@@ -1,0 +1,234 @@
+import mongoose from 'mongoose'
+import { HttpError } from '../utils/httpError.js'
+
+const fail = (message) => { throw new HttpError(400, 'VALIDATION_ERROR', message) }
+
+function body(request, allowed, required = allowed) {
+  const value = request.body
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('A JSON object is required.')
+  if (Object.keys(value).some((key) => !allowed.includes(key)) || required.some((key) => !(key in value))) fail('Unexpected or missing fields.')
+  return value
+}
+
+function text(value, label, min = 1, max = 4000) {
+  if (typeof value !== 'string' || value.trim().length < min || value.trim().length > max) fail(`${label} must be ${min}-${max} characters.`)
+  return value.trim()
+}
+
+function objectId(value, label) {
+  if (typeof value !== 'string' || !mongoose.isValidObjectId(value)) fail(`${label} is invalid.`)
+  return value
+}
+
+export function validateLogin(request, _response, next) {
+  const value = body(request, ['username', 'password'])
+  value.username = text(value.username, 'Username', 3, 50).toLowerCase()
+  if (!/^[a-z0-9._-]+$/.test(value.username)) fail('Username is invalid.')
+  value.password = text(value.password, 'Password', 1, 256)
+  next()
+}
+
+export function validateSubmission(request, _response, next) {
+  const value = body(request, ['applicantName'])
+  value.applicantName = text(value.applicantName, 'Applicant name', 2, 120)
+  next()
+}
+
+export function validateAcceptance(request, _response, next) {
+  const value = body(request, ['reason'])
+  value.reason = text(value.reason, 'Human decision reason', 10, 1000)
+  next()
+}
+
+export function validateReview(request, _response, next) {
+  const value = body(request, ['reviewState', 'reason'])
+  if (!['NEEDS_INFORMATION', 'READY_FOR_DECISION'].includes(value.reviewState)) fail('Review state is invalid.')
+  value.reason = text(value.reason, 'Review reason', 10, 1000)
+  next()
+}
+
+export function validateReviewOverride(request, _response, next) {
+  const value = body(request, ['reviewState', 'reason'])
+  if (!['PENDING_REVIEW', 'NEEDS_INFORMATION', 'READY_FOR_DECISION'].includes(value.reviewState)) fail('Review state is invalid.')
+  value.reason = text(value.reason, 'Override reason', 10, 1000)
+  next()
+}
+
+export function validateSearch(request, _response, next) {
+  if (Object.keys(request.query).some((key) => key !== 'identifier')) fail('Unexpected search parameter.')
+  if (!/^((APP|CASE)-\d{4}-\d{6})$/.test(request.query.identifier || '')) fail('A valid Application or Case ID is required.')
+  next()
+}
+
+export function validateWorkspace(request, _response, next) {
+  if (Object.keys(request.query).some((key) => key !== 'role')) fail('Unexpected workspace parameter.')
+  if (!['DLAO_OFFICER', 'MEDIATOR', 'HELPLINE_AGENT', 'UDC_OPERATOR', 'PANEL_LAWYER', 'RECEIVING_DLAO', 'CASE_SUPPORT', 'CLAO'].includes(request.query.role)) fail('A valid provider role is required.')
+  next()
+}
+
+export function validateTask(request, _response, next) {
+  const value = body(request, ['title', 'ownerRole', 'ownerUserId', 'nextAction', 'dueAt'], ['title', 'ownerRole', 'nextAction'])
+  value.title = text(value.title, 'Task title', 3, 120)
+  value.nextAction = text(value.nextAction, 'Next action', 5, 300)
+  if (!['DLAO_OFFICER', 'MEDIATOR', 'HELPLINE_AGENT', 'UDC_OPERATOR', 'PANEL_LAWYER', 'RECEIVING_DLAO', 'CASE_SUPPORT', 'CLAO'].includes(value.ownerRole)) fail('Owner role is invalid.')
+  if (value.ownerUserId !== undefined) objectId(value.ownerUserId, 'Owner user')
+  if (value.dueAt !== undefined && (typeof value.dueAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(value.dueAt) || Number.isNaN(Date.parse(value.dueAt)))) fail('Due date must be an ISO date-time.')
+  next()
+}
+
+export function validateContactAttempt(request, _response, next) {
+  const value = body(request, ['channel', 'outcome', 'reason'])
+  if (!['PHONE', 'SMS', 'WEB', 'IN_PERSON'].includes(value.channel)) fail('Contact channel is invalid.')
+  if (!['NO_ANSWER', 'UNKNOWN_PERSON', 'APPLICANT_REACHED', 'BLOCKED_UNSAFE'].includes(value.outcome)) fail('Contact outcome is invalid.')
+  value.reason = text(value.reason, 'Contact outcome reason', 5, 500)
+  next()
+}
+
+export function validateDocument(request, _response, next) {
+  const value = body(request, ['label', 'qualityState', 'note'], ['label', 'qualityState'])
+  value.label = text(value.label, 'Document label', 3, 160)
+  if (!['PENDING_REVIEW', 'READABLE', 'UNREADABLE'].includes(value.qualityState)) fail('Document quality state is invalid.')
+  if (value.note !== undefined) value.note = text(value.note, 'Document note', 3, 500)
+  next()
+}
+
+export function taskIdParam(request, _response, next) {
+  objectId(request.params.taskId, 'Task ID')
+  next()
+}
+
+export function validateRepresentation(request, _response, next) {
+  const value = body(request, ['representativeName', 'relationship', 'scope'])
+  value.representativeName = text(value.representativeName, 'Representative name', 2, 120)
+  value.relationship = text(value.relationship, 'Relationship', 2, 80)
+  value.scope = text(value.scope, 'Scope', 2, 250)
+  next()
+}
+
+export function validateFact(request, _response, next) {
+  const value = body(request, ['field', 'value', 'sourceType', 'sourcePersonId'], ['field', 'value', 'sourceType'])
+  value.field = text(value.field, 'Field', 1, 80)
+  if (!/^[a-z][a-z0-9_.]*$/.test(value.field)) fail('Field is invalid.')
+  value.value = text(value.value, 'Fact', 1, 4000)
+  if (!['REPRESENTATIVE_REPORTED', 'APPLICANT_REPORTED', 'STAFF_ENTERED'].includes(value.sourceType)) fail('Source type is invalid.')
+  if (value.sourceType !== 'STAFF_ENTERED') objectId(value.sourcePersonId, 'Source person')
+  if (value.sourceType === 'STAFF_ENTERED' && value.sourcePersonId !== undefined) fail('Staff-entered facts cannot claim a citizen source.')
+  next()
+}
+
+export function validateCorrection(request, _response, next) {
+  const value = body(request, ['value', 'attestation'])
+  value.value = text(value.value, 'Correction', 1, 4000)
+  value.attestation = text(value.attestation, 'Applicant confirmation attestation', 10, 500)
+  next()
+}
+
+export function validateSafeContact(request, _response, next) {
+  const value = body(request,
+    ['allowedChannels', 'prohibitedChannels', 'contactValue', 'safeTimeWindow', 'smsSafe', 'neutralWordingRequired'],
+    ['allowedChannels', 'prohibitedChannels', 'smsSafe', 'neutralWordingRequired'])
+  const allowed = ['PHONE', 'SMS', 'WEB', 'IN_PERSON']
+  for (const field of ['allowedChannels', 'prohibitedChannels']) {
+    if (!Array.isArray(value[field]) || value[field].some((item) => !allowed.includes(item)) || new Set(value[field]).size !== value[field].length) fail(`${field} is invalid.`)
+  }
+  if (!value.allowedChannels.length || value.allowedChannels.some((item) => value.prohibitedChannels.includes(item))) fail('Safe and prohibited channels conflict.')
+  if (typeof value.smsSafe !== 'boolean' || typeof value.neutralWordingRequired !== 'boolean') fail('Contact safety choices must be explicit.')
+  if (value.smsSafe && !value.allowedChannels.includes('SMS')) fail('SMS must be an allowed channel.')
+  if (value.contactValue !== undefined) value.contactValue = text(value.contactValue, 'Safe contact', 3, 100)
+  if (value.safeTimeWindow !== undefined) value.safeTimeWindow = text(value.safeTimeWindow, 'Safe time window', 2, 100)
+  next()
+}
+
+export function validateConsent(request, _response, next) {
+  const value = body(request, ['scope', 'state', 'attestation'])
+  if (!['LIVE_VOICE', 'AUDIO_STORAGE', 'TRANSCRIPT_STORAGE', 'STRUCTURED_FACTS', 'ASSISTED_INTAKE', 'CONTACT'].includes(value.scope)) fail('Consent scope is invalid.')
+  if (!['GRANTED', 'DENIED', 'WITHDRAWN'].includes(value.state)) fail('Consent state is invalid.')
+  value.attestation = text(value.attestation, 'Consent attestation', 10, 500)
+  next()
+}
+
+const oneOf = (options, label) => (value) => options.includes(value) ? value : fail(`${label} is invalid.`)
+const explicit = (label) => (value) => typeof value === 'boolean' ? value : fail(`${label} must be explicit.`)
+const voiceConsentScopes = ['LIVE_VOICE', 'AUDIO_STORAGE', 'TRANSCRIPT_STORAGE']
+const voiceAnswers = {
+  urgent: explicit('Urgency'),
+  callerRole: oneOf(['SELF', 'REPRESENTATIVE'], 'Caller role'),
+  callerName: (value) => text(value, 'Caller name', 2, 120),
+  relationship: (value) => text(value, 'Relationship', 2, 80),
+  applicantName: (value) => text(value, 'Applicant name', 2, 120),
+  identityDocument: oneOf(['AVAILABLE', 'UNAVAILABLE', 'UNKNOWN'], 'Identity document'),
+  problem: (value) => text(value, 'Problem', 5, 2000),
+  district: (value) => text(value, 'District', 2, 60),
+  contactChannel: oneOf(['PHONE', 'IN_PERSON'], 'Safe contact channel'),
+  contactValue: (value) => typeof value === 'string' && /^\+?[0-9][0-9 -]{5,19}$/.test(value.trim()) ? value.trim() : fail('Safe phone number is invalid.'),
+  contactOwner: oneOf(['APPLICANT', 'CALLER'], 'Phone owner'),
+  safeTime: (value) => text(value, 'Safe time', 2, 100),
+  smsSafe: explicit('SMS safety'),
+}
+
+// Mirrors the client script's active questions; the server still decides provenance itself.
+function voiceFields({ mode, answers }) {
+  if (mode === 'CALLBACK') return ['contactValue', 'safeTime', 'district', 'urgent']
+  const representative = answers.callerRole === 'REPRESENTATIVE'
+  const phone = answers.contactChannel === 'PHONE'
+  return ['urgent', 'callerRole', 'applicantName', 'identityDocument', 'problem', 'district', 'contactChannel', 'safeTime',
+    ...(representative ? ['callerName', 'relationship'] : []),
+    ...(phone ? ['contactValue', 'smsSafe'] : []),
+    ...(phone && representative ? ['contactOwner'] : [])]
+}
+
+export function validateEmptyBody(request, _response, next) {
+  if (request.body !== undefined && (typeof request.body !== 'object' || Object.keys(request.body).length)) fail('This request takes no body.')
+  next()
+}
+
+export function validateVoiceIntake(request, _response, next) {
+  const value = body(request, ['mode', 'callbackReason', 'consents', 'answers', 'correctedFields', 'aiFields', 'confirmation', 'transcript'], ['mode', 'consents', 'answers'])
+  oneOf(['INTAKE', 'CALLBACK'], 'Mode')(value.mode)
+  if (value.mode === 'CALLBACK') oneOf(['LIVE_VOICE_REFUSED', 'CALLER_REQUESTED_HUMAN', 'URGENT_HANDOFF', 'SENSITIVE_OR_UNCLEAR'], 'Callback reason')(value.callbackReason)
+  else if (value.callbackReason !== undefined) fail('Only a callback request has a callback reason.')
+  for (const field of ['consents', 'answers']) if (!value[field] || typeof value[field] !== 'object' || Array.isArray(value[field])) fail(`${field} must be an object.`)
+  for (const [scope, state] of Object.entries(value.consents)) {
+    oneOf(voiceConsentScopes, 'Consent scope')(scope)
+    oneOf(['GRANTED', 'DENIED'], 'Consent choice')(state)
+  }
+  if (value.mode === 'INTAKE' && (value.consents.LIVE_VOICE !== 'GRANTED' || voiceConsentScopes.some((scope) => !value.consents[scope]))) fail('Voice intake needs live-voice consent and explicit storage choices.')
+  const fields = voiceFields(value)
+  const keys = Object.keys(value.answers)
+  if (keys.length !== fields.length || keys.some((key) => !fields.includes(key))) fail('Unexpected or missing answers.')
+  for (const field of fields) value.answers[field] = voiceAnswers[field](value.answers[field])
+  for (const list of ['correctedFields', 'aiFields']) {
+    if (value[list] !== undefined && (!Array.isArray(value[list]) || value[list].some((field) => !fields.includes(field)) || new Set(value[list]).size !== value[list].length)) fail(`${list} is invalid.`)
+  }
+  if (value.confirmation !== undefined) oneOf(['BUTTON', 'VOICE'], 'Confirmation')(value.confirmation)
+  if (value.transcript !== undefined) {
+    // Transcript retention needs explicit consent; raw audio is never accepted at all.
+    if (value.consents.TRANSCRIPT_STORAGE !== 'GRANTED') fail('A transcript can be kept only with transcript consent.')
+    if (!Array.isArray(value.transcript) || !value.transcript.length || value.transcript.length > 300) fail('Transcript is invalid.')
+    value.transcript = value.transcript.map((turn) => {
+      if (!turn || typeof turn !== 'object' || Object.keys(turn).some((key) => !['speaker', 'text'].includes(key))) fail('Transcript is invalid.')
+      return { speaker: oneOf(['CALLER', 'ASSISTANT'], 'Transcript speaker')(turn.speaker), text: text(turn.text, 'Transcript text', 1, 2000) }
+    })
+  }
+  next()
+}
+
+export function applicationIdParam(request, _response, next) {
+  if (!/^APP-\d{4}-\d{6}$/.test(request.params.applicationId)) fail('Application ID is invalid.')
+  next()
+}
+
+export function caseIdParam(request, _response, next) {
+  if (!/^CASE-\d{4}-\d{6}$/.test(request.params.caseId)) fail('Case ID is invalid.')
+  next()
+}
+
+export function factIdParam(request, _response, next) {
+  objectId(request.params.factId, 'Fact ID')
+  next()
+}
+
+export function documentIdParam(request, _response, next) {
+  objectId(request.params.documentId, 'Document ID')
+  next()
+}
