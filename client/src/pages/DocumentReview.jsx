@@ -43,7 +43,7 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
   }, [applicationId, token])
 
   async function upload(filename, textContent, checklistName, quality) {
-    if (!/^[\w .()-]+\.txt$/i.test(filename) || new TextEncoder().encode(textContent).byteLength > 50000 || !textContent.trim()) throw new Error(bi('Use a non-empty fictional .txt file under 50 KB.', '৫০ কেবির কম, খালি নয় এমন .txt ফাইল দিন।'))
+    if (!/^[\w .()-]+\.txt$/i.test(filename) || new TextEncoder().encode(textContent).byteLength > 50000 || !textContent.trim()) throw new Error(bi('Use a non-empty fictional .txt file under 50 KB.', 'লেখা আছে এমন একটি নমুনা .txt ফাইল দিন, যার আকার ৫০ কেবির কম।'))
     return api(`/api/applications/${applicationId}/documents`, { token, method: 'POST', body: {
       label: filename.replace(/\.txt$/i, '').replaceAll('-', ' '), filename, textContent, checklistItem: checklistName, qualityState: quality,
     } })
@@ -68,7 +68,7 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
         if (!response.ok) throw new Error(bi(`Could not load sample ${filename}.`, `নমুনা ${filename} লোড হয়নি।`))
         await upload(filename, await response.text(), checklistName, quality)
       }
-      setNotice(bi('Six fictional documents uploaded. The deed is unreadable and the witness item is missing on purpose.', 'ছয়টি কাল্পনিক নথি আপলোড হয়েছে। দলিল ইচ্ছাকৃতভাবে অপাঠযোগ্য, সাক্ষীর কাগজ নেই।'))
+      setNotice(bi('Six fictional documents uploaded. The deed is unreadable and the witness item is missing on purpose.', 'ছয়টি নমুনা নথি আপলোড হয়েছে। পরীক্ষার জন্য দলিলটি পড়া যায় না এবং সাক্ষীর নথি রাখা হয়নি।'))
       onChanged()
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
@@ -78,7 +78,7 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
     try {
       const result = await api(`/api/applications/${applicationId}/briefing`, { token, method: 'POST' })
       setBriefing(result)
-      setNotice(bi('Draft briefing ready. Check every source before approving.', 'খসড়া সারসংক্ষেপ তৈরি। অনুমোদনের আগে প্রতিটি উৎস দেখুন।'))
+      setNotice(bi('Draft briefing ready. Check every source before approving.', 'নথির সারসংক্ষেপের খসড়া তৈরি হয়েছে। অনুমোদনের আগে প্রতিটি তথ্যের উৎস যাচাই করুন।'))
       onChanged()
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
@@ -90,7 +90,7 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
       await api(`/api/applications/${applicationId}/briefing/approve`, { token, method: 'POST', body: { reason: approvalReason } })
       setBriefing(await api(`/api/applications/${applicationId}/briefing`, { token }))
       setApprovalReason('')
-      setNotice(bi('Briefing accuracy approved. This is not a legal decision.', 'সারসংক্ষেপের নির্ভুলতা অনুমোদিত। এটি আইনি সিদ্ধান্ত নয়।'))
+      setNotice(bi('Briefing accuracy approved. This is not a legal decision.', 'সারসংক্ষেপটি নথির সঙ্গে মিলেছে বলে অনুমোদন দেওয়া হয়েছে। এটি মামলার আইনি সিদ্ধান্ত নয়।'))
       onChanged()
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
@@ -98,7 +98,7 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
   const generated = briefing && briefing.status !== 'NOT_GENERATED'
 
   return <Panel id="briefing-title" en="Document briefing" bn="নথির সারসংক্ষেপ" hint={generated ? say(briefing.status) : bi('Not generated', 'তৈরি হয়নি')}>
-    <p className="muted"><Bi en="Plain-text files only (50 KB). AI drafts, you verify. Unreadable text is never guessed." bn="শুধু টেক্সট ফাইল (৫০ কেবি)। এআই খসড়া করে, যাচাই আপনার। অপাঠযোগ্য লেখা অনুমান করা হয় না।" /></p>
+    <p className="muted"><Bi en="Plain-text files only (50 KB). AI drafts, you verify. Unreadable text is never guessed." bn="শুধু ৫০ কেবি পর্যন্ত লেখাযুক্ত ফাইল নেওয়া যাবে। এআই সারসংক্ষেপের খসড়া করবে; আপনাকে মূল নথির সঙ্গে মিলিয়ে দেখতে হবে। পড়া না গেলে এআই কিছু অনুমান করবে না।" /></p>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
     <dl className="details compact">
@@ -121,10 +121,10 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
     {generated && <div className="version-history">
       <h3><Bi en="Briefing" bn="সারসংক্ষেপ" /> <Badge code={briefing.status} /></h3>
       <p>{briefing.summary} <small className="muted">({briefing.model})</small></p>
-      <h3><Bi en="Sources" bn="উৎস" /></h3>{briefing.citations.length ? <ol>{briefing.citations.map((citation) => <li key={`${citation.documentVersionId}-${citation.line}`}><strong>{bi(`${citation.label}, line ${citation.line}`, `${citation.label}, লাইন ${num(citation.line)}`)}</strong> · {citation.excerpt}</li>)}</ol> : <p><Bi en="No readable lines." bn="পড়ার মতো কোনো লাইন নেই।" /></p>}
-      <h3><Bi en="Missing" bn="যা নেই" /></h3><p>{briefing.missing.length ? briefing.missing.map((name, index) => <span key={name}>{index ? ' · ' : ''}{item(name)}</span>) : bi('Nothing', 'কিছু না')}</p>
-      <h3><Bi en="Unreadable or uncertain" bn="অপাঠযোগ্য বা অনিশ্চিত" /></h3><p>{briefing.unreadable.join(' · ') || bi('Nothing', 'কিছু না')}</p>
-      {briefing.status === 'PROPOSED' && <form onSubmit={approve} className="form-stack inline-form"><label htmlFor="briefing-reason"><Bi en="Officer verification reason" bn="যাচাইয়ের কারণ" /></label><textarea id="briefing-reason" name="briefingReason" autoComplete="off" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} minLength="10" maxLength="500" required /><button type="submit" disabled={busy}><Bi en="Approve briefing accuracy only" bn="শুধু নির্ভুলতা অনুমোদন" /></button></form>}
+      <h3><Bi en="Sources" bn="উৎস" /></h3>{briefing.citations.length ? <ol>{briefing.citations.map((citation) => <li key={`${citation.documentVersionId}-${citation.line}`}><strong>{bi(`${citation.label}, line ${citation.line}`, `${citation.label}, লাইন ${num(citation.line)}`)}</strong> · {citation.excerpt}</li>)}</ol> : <p><Bi en="No readable lines." bn="পড়া যায় এমন কোনো লেখা পাওয়া যায়নি।" /></p>}
+      <h3><Bi en="Missing" bn="যা নেই" /></h3><p>{briefing.missing.length ? briefing.missing.map((name, index) => <span key={name}>{index ? ' · ' : ''}{item(name)}</span>) : bi('Nothing', 'কিছু নেই')}</p>
+      <h3><Bi en="Unreadable or uncertain" bn="অপাঠযোগ্য বা অনিশ্চিত" /></h3><p>{briefing.unreadable.join(' · ') || bi('Nothing', 'কিছু নেই')}</p>
+      {briefing.status === 'PROPOSED' && <form onSubmit={approve} className="form-stack inline-form"><label htmlFor="briefing-reason"><Bi en="Officer verification reason" bn="যাচাইয়ের কারণ" /></label><textarea id="briefing-reason" name="briefingReason" autoComplete="off" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} minLength="10" maxLength="500" required /><button type="submit" disabled={busy}><Bi en="Approve briefing accuracy only" bn="শুধু নথির সঙ্গে মিলেছে কি না অনুমোদন করুন" /></button></form>}
     </div>}
   </Panel>
 }

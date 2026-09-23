@@ -50,15 +50,15 @@ export default function TriagePanel({ applicationId, token }) {
       })
       setAssessments((current) => current.map((item) => item.id === decided.id ? decided : item))
       setReason('')
-      setNotice(bi('Triage decision saved. Priority and route are unchanged.', 'বাছাই সিদ্ধান্ত সংরক্ষিত। অগ্রাধিকার ও পথ অপরিবর্তিত।'))
+      setNotice(bi('Triage decision saved. Priority and route are unchanged.', 'পর্যালোচনার সিদ্ধান্ত সংরক্ষিত হয়েছে। অগ্রাধিকার ও কোন অফিসে যাবে, সেই সিদ্ধান্ত বদলায়নি।'))
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
 
-  return <Panel id="triage-title" en="AI triage" bn="এআই বাছাই" hint={latest ? say(latest.status) : assessments && bi('Not run', 'চালানো হয়নি')}>
+  return <Panel id="triage-title" en="AI triage" bn="এআইয়ের প্রাথমিক পর্যালোচনা" hint={latest ? say(latest.status) : assessments && bi('Not run', 'চালানো হয়নি')}>
     <p className="muted"><Bi en="AI suggests, you decide. No names, contact details or statements are sent." bn="এআই পরামর্শ দেয়, সিদ্ধান্ত আপনার। নাম, নম্বর বা বক্তব্য পাঠানো হয় না।" /></p>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
-    <button type="button" onClick={run} disabled={busy}>{latest?.status === 'PENDING_HUMAN_REVIEW' ? <Bi en="Run again" bn="আবার চালান" /> : <Bi en="Run triage" bn="বাছাই চালান" />}</button>
+    <button type="button" onClick={run} disabled={busy}>{latest?.status === 'PENDING_HUMAN_REVIEW' ? <Bi en="Run again" bn="আবার চালান" /> : <Bi en="Run triage" bn="প্রাথমিক পর্যালোচনা করুন" />}</button>
     {assessments === null && !error && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
     {latest && <>
       <p className="muted">{latest.aiAssisted ? `${bi('AI', 'এআই')} (${latest.model})` : bi('Rules only', 'শুধু নিয়ম')} · <Term code={latest.status} /></p>
@@ -67,7 +67,7 @@ export default function TriagePanel({ applicationId, token }) {
         <h3><Term code={component.name} /></h3>
         <p><Badge code={component.recommendation} /> <small><Bi en="Urgency" bn="জরুরিতা" />: <Term code={component.urgencySignal} /></small></p>
         <ul>{component.reasons.map((item, index) => <li key={`${component.name}-reason-${index}`}>{tr(item)}</li>)}</ul>
-        <small className="muted"><Bi en="Uncertainty" bn="অনিশ্চয়তা" />: {tr(component.uncertainty)}{component.evidenceRefs.length ? <> · <Bi en="Sources" bn="উৎস" />: {component.evidenceRefs.map((ref) => <code key={ref}>{ref} </code>)}</> : null}</small>
+        <small className="muted"><Bi en="Uncertainty" bn="যা নিশ্চিত নয়" />: {tr(component.uncertainty)}{component.evidenceRefs.length ? <> · <Bi en="Sources" bn="উৎস" />: {component.evidenceRefs.map((ref) => <code key={ref}>{ref} </code>)}</> : null}</small>
       </article>)}</div>
       {latest.status === 'PENDING_HUMAN_REVIEW' ? <form className="form-stack inline-form" onSubmit={decide}>
         <h3><Bi en="Your decision" bn="আপনার সিদ্ধান্ত" /></h3>

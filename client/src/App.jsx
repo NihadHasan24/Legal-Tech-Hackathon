@@ -111,7 +111,7 @@ export default function App() {
 
   async function signOut() {
     const token = session.token
-    try { await clearOfflineDrafts() } catch { window.alert(bi('Local drafts could not be cleared. Do not leave this browser on a shared device.', 'এই ডিভাইসের খসড়া মোছা যায়নি। শেয়ার করা ডিভাইসে ব্রাউজারটি খোলা রেখে যাবেন না।')) }
+    try { await clearOfflineDrafts() } catch { window.alert(bi('Local drafts could not be cleared. Do not leave this browser on a shared device.', 'এই ডিভাইসের খসড়া মোছা যায়নি। অন্যের সঙ্গে ব্যবহার করা ডিভাইসে এই পৃষ্ঠা খোলা রাখবেন না।')) }
     setSession(null)
     navigate('/')
     try { await api('/api/auth/logout', { token, method: 'POST' }) } catch { /* Browser session is already cleared if the network is unavailable. */ }
@@ -129,7 +129,7 @@ export default function App() {
     <>
       <a className="skip-link" href="#main">{bi('Skip to main content', 'মূল অংশে যান')}</a>
       <header className="site-header">
-        <Link className="brand" to="/" aria-label={pathname === '/voice' ? bi('DLAS voice intake home', 'DLAS ভয়েস আবেদনের শুরু') : bi('DLAS provider workspace home', 'DLAS কর্মক্ষেত্রের শুরু')}>DLAS <span>{pathname === '/voice' ? bi('Voice intake', 'ভয়েস আবেদন') : bi('Provider workspace', 'কর্মক্ষেত্র')}</span></Link>
+        <Link className="brand" to="/" aria-label={pathname === '/voice' ? bi('DLAS voice intake home', 'DLAS-এ ফোনে আবেদনের শুরু') : bi('DLAS provider workspace home', 'DLAS কর্মীদের কাজের শুরু')}>DLAS <span>{pathname === '/voice' ? bi('Voice intake', 'ফোনে আবেদন') : bi('Provider workspace', 'কর্মক্ষেত্র')}</span></Link>
         {pathname !== '/voice' && (session || pathname !== '/') && <span className="prototype-label">{bi('Prototype · fictional data', 'প্রোটোটাইপ · কাল্পনিক তথ্য')}</span>}
         <div className="lang-switch" role="group" aria-label="Language / ভাষা">
           <button type="button" lang="bn" aria-pressed={lang === 'bn'} onClick={() => setLang('bn')}>বাংলা</button>

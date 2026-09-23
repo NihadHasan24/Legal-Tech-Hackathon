@@ -39,21 +39,21 @@ export default function IncidentGroupPage({ session }) {
 
   return <section aria-labelledby="group-title">
     {back}
-    <p className="eyebrow"><Bi en="Related cases · linked, not merged" bn="সম্পর্কিত মামলা · যুক্ত, একীভূত নয়" /></p>
+    <p className="eyebrow"><Bi en="Related cases · linked, not merged" bn="সম্পর্কিত মামলাগুলো আলাদা নথিতে রাখা হয়েছে" /></p>
     <h1 id="group-title">{data.title}</h1>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
-    <p className="safety-note"><Bi en="Only linked standard evidence is shared. Facts, instructions, outcomes and restricted evidence stay on each case." bn="শুধু যুক্ত সাধারণ প্রমাণ ভাগ হয়। তথ্য, নির্দেশনা, ফলাফল ও সীমিত প্রমাণ প্রতিটি মামলায় আলাদা থাকে।" /></p>
+    <p className="safety-note"><Bi en="Only linked standard evidence is shared. Facts, instructions, outcomes and restricted evidence stay on each case." bn="শুধু নির্বাচিত সাধারণ প্রমাণ অন্য মামলায় দেখা যাবে। প্রতিটি মামলার তথ্য, নির্দেশনা, ফলাফল ও সংবেদনশীল প্রমাণ আলাদাই থাকবে।" /></p>
     <section className="card" aria-labelledby="members-title"><h2 id="members-title"><Bi en="Separate Case records" bn="আলাদা মামলার রেকর্ড" /></h2>
       <ul className="plain-list">{data.members.map((member) => <li key={member.applicationId}><div><strong>{member.applicantName}</strong><p className="muted">{member.caseId || bi('No Case ID', 'মামলা নম্বর নেই')} · {member.applicationId}</p></div><Link to={`/applications/${member.applicationId}`}><Bi en="Open case" bn="মামলা খুলুন" /></Link></li>)}</ul>
     </section>
     <section className="card" aria-labelledby="shared-evidence-title"><h2 id="shared-evidence-title"><Bi en="Shared evidence" bn="যৌথ প্রমাণ" /></h2>
-      {data.sharedEvidence.length === 0 && <p className="muted"><Bi en="Nothing shared yet." bn="এখনো কিছু ভাগ করা হয়নি।" /></p>}
+      {data.sharedEvidence.length === 0 && <p className="muted"><Bi en="Nothing shared yet." bn="অন্য মামলায় দেখার জন্য এখনো কোনো প্রমাণ যুক্ত হয়নি।" /></p>}
       <ul className="plain-list">{data.sharedEvidence.map((document) => <li key={document.id}><div><strong>{document.label}</strong> <Badge code={document.qualityState} /><p className="muted"><Bi en="From" bn="উৎস" /> {document.sourceCaseId || '—'} · <Bi en="version" bn="সংস্করণ" /> {num(document.currentVersion)}</p>{document.textContent && <details><summary><Bi en="Read common evidence text" bn="প্রমাণের লেখা পড়ুন" /></summary><pre>{document.textContent}</pre></details>}</div></li>)}</ul>
       {data.availableDocuments.length > 0 && <form onSubmit={share} className="form-stack inline-form">
-        <label htmlFor="shared-document"><Bi en="Readable document from a member case" bn="সদস্য মামলার পাঠযোগ্য নথি" /></label><select id="shared-document" value={documentId || data.availableDocuments[0].id} onChange={(event) => setDocumentId(event.target.value)}>{data.availableDocuments.map((document) => <option key={document.id} value={document.id}>{document.label} · {document.sourceCaseId}</option>)}</select>
+        <label htmlFor="shared-document"><Bi en="Readable document from a member case" bn="যুক্ত মামলাগুলোর একটি থেকে পড়া যায় এমন নথি" /></label><select id="shared-document" value={documentId || data.availableDocuments[0].id} onChange={(event) => setDocumentId(event.target.value)}>{data.availableDocuments.map((document) => <option key={document.id} value={document.id}>{document.label} · {document.sourceCaseId}</option>)}</select>
         <label htmlFor="shared-evidence-reason"><Bi en="Reason this common evidence is relevant" bn="কেন এই প্রমাণ সবার জন্য প্রাসঙ্গিক" /></label><textarea id="shared-evidence-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="10" maxLength="1000" required />
-        <button type="submit" disabled={busy}><Bi en="Share existing evidence reference" bn="প্রমাণের সূত্র ভাগ করুন" /></button>
+        <button type="submit" disabled={busy}><Bi en="Share existing evidence reference" bn="অন্য মামলায় প্রমাণটির সূত্র দেখান" /></button>
       </form>}
     </section>
   </section>

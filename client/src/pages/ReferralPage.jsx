@@ -64,7 +64,7 @@ export default function ReferralPage({ session }) {
           {data.responseReason && <div><dt><Bi en="Your reply" bn="আপনার উত্তর" /></dt><dd>{data.responseReason}</dd></div>}
         </dl></section>
         <section className="card safety-card" aria-labelledby="referral-safe-title"><h2 id="referral-safe-title"><Bi en="Safe contact" bn="নিরাপদ যোগাযোগ" /></h2>
-          {!data.safeContact ? <p><Bi en="No safe route recorded. Do not contact until the sending office confirms one." bn="নিরাপদ পথ লেখা নেই। প্রেরক অফিস নিশ্চিত না করা পর্যন্ত যোগাযোগ করবেন না।" /></p> : <dl className="details compact">
+          {!data.safeContact ? <p><Bi en="No safe route recorded. Do not contact until the sending office confirms one." bn="কীভাবে নিরাপদে যোগাযোগ করা যাবে, তা নথিতে নেই। প্রেরক অফিস নিশ্চিত না করা পর্যন্ত আবেদনকারীর সঙ্গে যোগাযোগ করবেন না।" /></p> : <dl className="details compact">
             <div><dt><Bi en="Use" bn="ব্যবহার করুন" /></dt><dd>{data.safeContact.allowedChannels.map(say).join(', ') || bi('None', 'নেই')}</dd></div>
             <div><dt><Bi en="Never use" bn="কখনো নয়" /></dt><dd>{data.safeContact.prohibitedChannels.map(say).join(', ') || bi('None', 'নেই')}</dd></div>
             <div><dt><Bi en="Safe time" bn="নিরাপদ সময়" /></dt><dd>{data.safeContact.safeTimeWindow || bi('Not recorded', 'লেখা নেই')}</dd></div>
@@ -75,7 +75,7 @@ export default function ReferralPage({ session }) {
       </div>
 
       <section className="card" aria-labelledby="referral-docs-title"><h2 id="referral-docs-title"><Bi en="Documents and evidence" bn="নথি ও প্রমাণ" /></h2>
-        {data.documents.length === 0 ? <p><Bi en="No documents shared with you." bn="আপনার সাথে কোনো নথি ভাগ করা হয়নি।" /></p> : <ul className="plain-list">{data.documents.map((item) => <li key={item.id}><div><strong>{item.label}</strong> <Badge code={item.sensitivity} /><p className="muted"><Bi en="Version" bn="সংস্করণ" /> {num(item.currentVersion)}{item.sensitivity === 'RESTRICTED' ? ` · ${bi('opening is logged', 'খোলা লগ হয়')}` : ''}</p></div>{data.responsible && live && <button type="button" className="secondary-button" onClick={() => open(item)} aria-label={bi(`Open ${item.label}`, `${item.label} খুলুন`)}><Bi en="Open" bn="খুলুন" /></button>}</li>)}</ul>}
+        {data.documents.length === 0 ? <p><Bi en="No documents shared with you." bn="আপনাকে দেখার জন্য কোনো নথি দেওয়া হয়নি।" /></p> : <ul className="plain-list">{data.documents.map((item) => <li key={item.id}><div><strong>{item.label}</strong> <Badge code={item.sensitivity} /><p className="muted"><Bi en="Version" bn="সংস্করণ" /> {num(item.currentVersion)}{item.sensitivity === 'RESTRICTED' ? ` · ${bi('opening is logged', 'প্রতিবার দেখার তথ্য সংরক্ষিত হয়')}` : ''}</p></div>{data.responsible && live && <button type="button" className="secondary-button" onClick={() => open(item)} aria-label={bi(`Open ${item.label}`, `${item.label} খুলুন`)}><Bi en="Open" bn="খুলুন" /></button>}</li>)}</ul>}
         {data.restrictedEvidenceCount > 0 && !data.documents.some((item) => item.sensitivity === 'RESTRICTED') && <p className="muted"><Bi en={`${data.restrictedEvidenceCount} restricted item(s): named officer only.`} bn={`${num(data.restrictedEvidenceCount)}টি সীমিত প্রমাণ: শুধু নির্দিষ্ট কর্মকর্তার জন্য।`} /></p>}
         {opened && <div className="version-history" role="status"><h3>{opened.label}</h3><p><Bi en="Version" bn="সংস্করণ" /> {num(opened.currentVersion)} · <Term code={opened.version?.qualityState} />{opened.version?.note ? ` · ${opened.version.note}` : ''}</p></div>}
       </section>
@@ -83,7 +83,7 @@ export default function ReferralPage({ session }) {
       {data.previousReturns.length > 0 && <section className="card" aria-labelledby="returns-title"><h2 id="returns-title"><Bi en="Earlier returns of this case" bn="আগে যতবার ফেরত এসেছে" /></h2><ol className="timeline compact">{data.previousReturns.map((item, index) => <li key={index}><strong>{item.receivingOfficeCode}</strong> <small>{when(item.respondedAt)}</small><p>{item.reason}</p></li>)}</ol></section>}
 
       <section className="card" aria-labelledby="respond-title"><h2 id="respond-title"><Bi en="Your office's response" bn="আপনার অফিসের উত্তর" /></h2>
-        <p className="muted"><Bi en="Acknowledge = received. Accept = your office will act. Repeated returns go to an officer who decides the route." bn="স্বীকার = পেয়েছেন। গ্রহণ = আপনার অফিস কাজ করবে। বারবার ফেরত গেলে একজন কর্মকর্তা পথ ঠিক করেন।" /></p>
+        <p className="muted"><Bi en="Acknowledge = received. Accept = your office will act. Repeated returns go to an officer who decides the route." bn="প্রাপ্তি স্বীকার মানে আপনার অফিস রেফারেলটি পেয়েছে। গ্রহণ করলে আপনার অফিস ব্যবস্থা নেবে। বারবার ফেরত এলে কোন অফিসে যাবে, তা একজন কর্মকর্তা ঠিক করবেন।" /></p>
         {data.status === 'SENT' && <button type="button" onClick={() => respond({ action: 'ACKNOWLEDGE' }, bi('Receipt acknowledged. The sending office can see this.', 'প্রাপ্তি স্বীকার করা হয়েছে। প্রেরক অফিস দেখতে পাবে।'))}><Bi en="Acknowledge receipt" bn="প্রাপ্তি স্বীকার" /></button>}
         {(data.status === 'SENT' || data.status === 'ACKNOWLEDGED') ? <form onSubmit={submitResponse} className="form-stack inline-form">
           <label htmlFor="referral-decision"><Bi en="Decision" bn="সিদ্ধান্ত" /></label>
@@ -91,7 +91,7 @@ export default function ReferralPage({ session }) {
           <label htmlFor="referral-response-reason"><Bi en="Response reason" bn="উত্তরের কারণ" /></label>
           <textarea id="referral-response-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="10" maxLength="1000" required />
           <button type="submit"><Bi en="Record response" bn="উত্তর সংরক্ষণ" /></button>
-        </form> : <p><Bi en="Response recorded:" bn="উত্তর লেখা হয়েছে:" /> <Term code={data.status} /> · {when(data.respondedAt)}</p>}
+        </form> : <p><Bi en="Response recorded:" bn="আপনার অফিসের সিদ্ধান্ত নথিভুক্ত হয়েছে:" /> <Term code={data.status} /> · {when(data.respondedAt)}</p>}
       </section>
     </>}
   </section>

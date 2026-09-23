@@ -34,14 +34,14 @@ export default function LawyerCasePage({ session }) {
 
   function respond(decision) {
     send(`/api/lawyers/assignments/${record.assignmentId}/respond`, { decision, reason: responseReason },
-      decision === 'ACCEPT' ? bi('Assignment accepted.', 'নিয়োগ গ্রহণ করা হয়েছে।') : bi('Assignment declined. The DLAO has been told.', 'নিয়োগ প্রত্যাখ্যাত। ডিএলএও জানতে পারবেন।'))
+      decision === 'ACCEPT' ? bi('Assignment accepted.', 'নিয়োগ গ্রহণ করা হয়েছে।') : bi('Assignment declined. The DLAO has been told.', 'আপনি মামলাটি নিতে অস্বীকার করেছেন। ডিএলএও কর্মকর্তাকে জানানো হবে।'))
   }
 
   function submitUpdate(event, update) {
     event.preventDefault()
     const draft = drafts[update._id] || {}
     send(`/api/lawyers/assignments/${record.assignmentId}/updates/${update._id}`, draft,
-      bi(`Progress update ${num(update.sequence)} recorded.`, 'অগ্রগতির আপডেট লেখা হয়েছে।'))
+      bi(`Progress update ${num(update.sequence)} recorded.`, 'মামলার অগ্রগতি নথিভুক্ত হয়েছে।'))
   }
 
   const back = <Link to="/">← <Bi en="Lawyer worklist" bn="আইনজীবীর কাজের তালিকা" /></Link>
@@ -67,7 +67,7 @@ export default function LawyerCasePage({ session }) {
       </dl>
     </section>
 
-    {pending && <section className="card" aria-labelledby="decision-title"><h2 id="decision-title"><Bi en="Respond to assignment offer" bn="নিয়োগ প্রস্তাবে উত্তর দিন" /></h2><p className="muted"><Bi en="It is not your case until you accept." bn="গ্রহণ না করা পর্যন্ত মামলাটি আপনার নয়।" /></p>
+    {pending && <section className="card" aria-labelledby="decision-title"><h2 id="decision-title"><Bi en="Respond to assignment offer" bn="নিয়োগ প্রস্তাবে উত্তর দিন" /></h2><p className="muted"><Bi en="It is not your case until you accept." bn="প্রস্তাবটি গ্রহণ করার আগে আপনি এই মামলার দায়িত্বে থাকবেন না।" /></p>
       <label htmlFor="assignment-response-reason"><Bi en="Reason for accepting or declining" bn="গ্রহণ বা প্রত্যাখ্যানের কারণ" /></label><textarea id="assignment-response-reason" value={responseReason} onChange={(event) => setResponseReason(event.target.value)} minLength="10" maxLength="500" required />
       <div className="choice-row"><button type="button" disabled={busy || responseReason.trim().length < 10} onClick={() => respond('ACCEPT')}><Bi en="Accept assignment" bn="নিয়োগ গ্রহণ" /></button><button type="button" className="secondary-button" disabled={busy || responseReason.trim().length < 10} onClick={() => respond('DECLINE')}><Bi en="Decline" bn="প্রত্যাখ্যান" /></button></div>
     </section>}
@@ -88,10 +88,10 @@ export default function LawyerCasePage({ session }) {
       </div></section>
 
       <section className="panel" aria-labelledby="documents-title"><div className="panel-body"><h2 id="documents-title" className="panel-heading"><Bi en="Documents" bn="নথি" /></h2><p className="muted"><Bi en="Restricted evidence is not shown here." bn="সীমিত প্রমাণ এখানে দেখানো হয় না।" /></p>
-        {!record.documents?.length ? <p><Bi en="No documents linked." bn="কোনো নথি যুক্ত নেই।" /></p> : <ul className="plain-list">{record.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong> {document.version?.qualityState && <Badge code={document.version.qualityState} />}<p className="muted"><Bi en="Version" bn="সংস্করণ" /> {num(document.currentVersion)}</p>{document.version?.qualityState === 'READABLE' && <details><summary><Bi en="Read linked document text" bn="নথির লেখা পড়ুন" /></summary><pre>{document.version.textContent || bi('No readable text stored.', 'পড়ার মতো লেখা নেই।')}</pre></details>}{document.version?.qualityState === 'UNREADABLE' && <p><Bi en="Unreadable: a person must check it." bn="অপাঠযোগ্য: একজনকে যাচাই করতে হবে।" /></p>}</div></li>)}</ul>}
+        {!record.documents?.length ? <p><Bi en="No documents linked." bn="কোনো নথি যুক্ত নেই।" /></p> : <ul className="plain-list">{record.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong> {document.version?.qualityState && <Badge code={document.version.qualityState} />}<p className="muted"><Bi en="Version" bn="সংস্করণ" /> {num(document.currentVersion)}</p>{document.version?.qualityState === 'READABLE' && <details><summary><Bi en="Read linked document text" bn="নথির লেখা পড়ুন" /></summary><pre>{document.version.textContent || bi('No readable text stored.', 'পড়ার মতো লেখা নেই।')}</pre></details>}{document.version?.qualityState === 'UNREADABLE' && <p><Bi en="Unreadable: a person must check it." bn="নথিটি পড়া যাচ্ছে না; একজন কর্মীকে যাচাই করতে হবে।" /></p>}</div></li>)}</ul>}
       </div></section>
 
-      <section className="panel" aria-labelledby="payment-read-title"><div className="panel-body"><h2 id="payment-read-title" className="panel-heading"><Bi en="Payment status" bn="পেমেন্টের অবস্থা" /></h2><p className="muted"><Bi en="Status only. No money moves here." bn="শুধু অবস্থা। এখানে টাকা লেনদেন হয় না।" /></p>{record.payment ? <p><Term code={record.payment.stage} /> · <Badge code={record.payment.status} /> · {record.payment.reason}</p> : <p><Bi en="Nothing recorded." bn="কিছু লেখা নেই।" /></p>}</div></section>
+      <section className="panel" aria-labelledby="payment-read-title"><div className="panel-body"><h2 id="payment-read-title" className="panel-heading"><Bi en="Payment status" bn="পেমেন্টের অবস্থা" /></h2><p className="muted"><Bi en="Status only. No money moves here." bn="এখানে শুধু পেমেন্টের অবস্থা দেখা যায়; টাকা লেনদেন হয় না।" /></p>{record.payment ? <p><Term code={record.payment.stage} /> · <Badge code={record.payment.status} /> · {record.payment.reason}</p> : <p><Bi en="Nothing recorded." bn="কিছু লেখা নেই।" /></p>}</div></section>
     </div>}
   </section>
 }

@@ -114,7 +114,7 @@ try {
       temporaryId: randomUUID(), clientMutationId: randomUUID(), offlineCreatedAt: new Date().toISOString(),
       applicantName: 'Fictional Nuching (demo)', translatorName: 'Fictional Marma translator', typistName: udc.displayName,
       originalLanguage: 'Marma', originalStatement: 'Fictional Marma account: a land record needs review.',
-      translatedStatement: 'কাল্পনিক বাংলা অনুবাদ: জমির নথি যাচাই করতে মানব সহায়তা প্রয়োজন.',
+      translatedStatement: 'নমুনা বাংলা অনুবাদ: জমির নথিটি একজন কর্মকর্তার দেখে দেওয়া দরকার।',
       caseType: 'LAND', consentAttestation: 'Fictional applicant gave oral consent to assisted intake.',
       originalConfirmed: false, translationConfirmed: false, contactChannel: 'IN_PERSON', safeTime: 'Weekday morning at the office',
     }, { userId: udc._id, displayName: udc.displayName, assignments: [udcRole] })

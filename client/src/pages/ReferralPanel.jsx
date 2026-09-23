@@ -35,12 +35,12 @@ export default function ReferralPanel({ applicationId, officeCode, accepted, ref
   const offices = [...new Set(receivers.map((item) => item.officeCode).filter((code) => code !== officeCode))]
   const standard = documents.filter((item) => item.sensitivity === 'STANDARD')
   const restricted = documents.filter((item) => item.sensitivity === 'RESTRICTED' && !item.redacted)
-  const blocked = !accepted ? bi('Accept the application first.', 'আগে আবেদন গ্রহণ করুন।')
-    : referrals.escalation ? bi('Further transfers are blocked until the route is decided above.', 'উপরে পথ ঠিক না হওয়া পর্যন্ত আর পাঠানো যাবে না।')
-      : waiting ? bi('A referral is still waiting for the other office.', 'একটি রেফারেল এখনো অন্য অফিসের অপেক্ষায়।')
-        : decided?.route === 'RETAIN' ? bi('Route decision: keep in this office.', 'পথের সিদ্ধান্ত: এই অফিসেই থাকবে।') : ''
+  const blocked = !accepted ? bi('Accept the application first.', 'আগে আবেদনটি গ্রহণ করুন।')
+    : referrals.escalation ? bi('Further transfers are blocked until the route is decided above.', 'কোন অফিসে পাঠানো হবে তা ঠিক না হওয়া পর্যন্ত আর পাঠানো যাবে না।')
+      : waiting ? bi('A referral is still waiting for the other office.', 'আগে পাঠানো রেফারেলটির জবাব এখনো আসেনি।')
+        : decided?.route === 'RETAIN' ? bi('Route decision: keep in this office.', 'সিদ্ধান্ত অনুযায়ী মামলাটি এই অফিসেই থাকবে।') : ''
   const latest = referrals.referrals.at(-1)
-  const hint = referrals.escalation ? bi('Route decision needed', 'পথের সিদ্ধান্ত দরকার') : latest ? `${latest.receivingOfficeCode} · ${say(latest.status)}` : bi('None', 'নেই')
+  const hint = referrals.escalation ? bi('Route decision needed', 'কোন অফিসে যাবে, তা ঠিক করতে হবে') : latest ? `${latest.receivingOfficeCode} · ${say(latest.status)}` : bi('None', 'নেই')
 
   async function send(event) {
     event.preventDefault()
@@ -53,33 +53,33 @@ export default function ReferralPanel({ applicationId, officeCode, accepted, ref
 
   async function decide(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/routing-decision`, { route, ...(route === 'REFER' ? { officeCode: routeOffice } : {}), reason: routeReason }, bi('Route decision saved.', 'পথের সিদ্ধান্ত সংরক্ষিত।'))
+    const result = await change(`/api/applications/${applicationId}/routing-decision`, { route, ...(route === 'REFER' ? { officeCode: routeOffice } : {}), reason: routeReason }, bi('Route decision saved.', 'কোন অফিসে যাবে, সেই সিদ্ধান্ত সংরক্ষিত হয়েছে।'))
     if (result) setRouteReason('')
   }
 
   return <Panel id="referral-title" en="Referral" bn="রেফারেল" hint={hint} open={Boolean(referrals.escalation) || overdue}>
-    <p className="muted"><Bi en={`Returns: ${referrals.returns} of ${referrals.threshold}. At ${referrals.threshold}, an officer decides the route.`} bn={`ফেরত: ${num(referrals.threshold)}-এর মধ্যে ${num(referrals.returns)}। ${num(referrals.threshold)} হলে একজন কর্মকর্তা পথ ঠিক করবেন।`} /></p>
+    <p className="muted"><Bi en={`Returns: ${referrals.returns} of ${referrals.threshold}. At ${referrals.threshold}, an officer decides the route.`} bn={`${num(referrals.returns)} বার রেফারেল ফেরত এসেছে। ${num(referrals.threshold)} বার হলে কোন অফিসে যাবে, তা একজন কর্মকর্তা ঠিক করবেন।`} /></p>
     {error && <p role="alert" className="error">{error}</p>}
 
     {referrals.escalation && <section className="escalation-box" aria-labelledby="escalation-title">
       <h3 id="escalation-title"><Term code={referrals.escalation.title} /></h3>
       <p>{tr(referrals.escalation.nextAction)}</p>
       <form onSubmit={decide} className="form-stack">
-        <label htmlFor="route-choice"><Bi en="Route" bn="পথ" /></label>
+        <label htmlFor="route-choice"><Bi en="Route" bn="কোন অফিসে যাবে" /></label>
         <select id="route-choice" value={route} onChange={(event) => setRoute(event.target.value)}><option value="REFER">{say('REFER')}</option><option value="RETAIN">{say('RETAIN')}</option></select>
         {route === 'REFER' && <><label htmlFor="route-office"><Bi en="Office that must act" bn="যে অফিস কাজ করবে" /></label><select id="route-office" value={routeOffice} onChange={(event) => setRouteOffice(event.target.value)} required><option value="">{bi('Choose', 'বাছাই করুন')}</option>{offices.map((code) => <option key={code} value={code}>{code}</option>)}</select></>}
         <label htmlFor="route-reason"><Bi en="Reason" bn="কারণ" /></label>
         <textarea id="route-reason" value={routeReason} onChange={(event) => setRouteReason(event.target.value)} minLength="10" maxLength="1000" required />
-        <button type="submit"><Bi en="Save route decision" bn="পথের সিদ্ধান্ত সংরক্ষণ" /></button>
+        <button type="submit"><Bi en="Save route decision" bn="অফিস নির্বাচনের সিদ্ধান্ত সংরক্ষণ করুন" /></button>
       </form>
     </section>}
-    {decided && <p><Bi en="Route decision:" bn="পথের সিদ্ধান্ত:" /> <strong>{decided.route === 'REFER' ? `${say('REFER')}: ${decided.officeCode}` : say('RETAIN')}</strong> · {decided.reason} · {when(decided.decidedAt)}</p>}
+    {decided && <p><Bi en="Route decision:" bn="কোন অফিসে যাবে:" /> <strong>{decided.route === 'REFER' ? `${say('REFER')}: ${decided.officeCode}` : say('RETAIN')}</strong> · {decided.reason} · {when(decided.decidedAt)}</p>}
 
     {referrals.referrals.length === 0 ? <p><Bi en="No referrals sent." bn="কোনো রেফারেল পাঠানো হয়নি।" /></p> : <ol className="timeline compact">{referrals.referrals.map((item) => <li key={item.id}>
       <strong>{item.receivingOfficeCode}</strong> <Badge code={item.status} />{item.overdue && <> <span className="badge warn-badge"><Bi en="Acknowledgement overdue" bn="প্রাপ্তি স্বীকার বাকি" /></span></>}
       <p>{item.expectedAction}</p>
       {item.responseReason && <p><Bi en="Reply:" bn="উত্তর:" /> {item.responseReason}</p>}
-      <small>{when(item.createdAt)} · {item.responsibleName} · <Bi en="acknowledge by" bn="প্রাপ্তি স্বীকারের শেষ সময়" /> {when(item.dueAt)} · <Bi en={`${item.documentCount} documents, ${item.restrictedEvidenceCount} restricted`} bn={`${num(item.documentCount)}টি নথি, ${num(item.restrictedEvidenceCount)}টি সীমিত`} />{item.acknowledgedAt ? ` · ${bi('acknowledged', 'স্বীকৃত')} ${when(item.acknowledgedAt)}` : ''}</small>
+      <small>{when(item.createdAt)} · {item.responsibleName} · <Bi en="acknowledge by" bn="প্রাপ্তি স্বীকারের শেষ সময়" /> {when(item.dueAt)} · <Bi en={`${item.documentCount} documents, ${item.restrictedEvidenceCount} restricted`} bn={`${num(item.documentCount)}টি নথি, এর মধ্যে ${num(item.restrictedEvidenceCount)}টি সংবেদনশীল`} />{item.acknowledgedAt ? ` · ${bi('acknowledged', 'স্বীকৃত')} ${when(item.acknowledgedAt)}` : ''}</small>
     </li>)}</ol>}
 
     {blocked ? <p className="muted">{blocked}</p> : <AddForm en="Send referral" bn="রেফারেল পাঠান">
@@ -94,11 +94,11 @@ export default function ReferralPanel({ applicationId, officeCode, accepted, ref
         <input id="referral-action" value={expectedAction} onChange={(event) => setExpectedAction(event.target.value)} minLength="5" maxLength="300" required />
         <label htmlFor="referral-due"><Bi en="Acknowledge by" bn="প্রাপ্তি স্বীকারের শেষ সময়" /></label>
         <input id="referral-due" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required />
-        {standard.length > 0 && <fieldset><legend><Bi en="Documents to include" bn="যে নথি যাবে" /></legend>{standard.map((item) => <label key={item.id} className="checkbox-label"><input type="checkbox" checked={documentIds.includes(item.id)} onChange={() => setDocumentIds(toggle(documentIds, item.id))} />{item.label}</label>)}</fieldset>}
+        {standard.length > 0 && <fieldset><legend><Bi en="Documents to include" bn="যেসব নথি পাঠাবেন" /></legend>{standard.map((item) => <label key={item.id} className="checkbox-label"><input type="checkbox" checked={documentIds.includes(item.id)} onChange={() => setDocumentIds(toggle(documentIds, item.id))} />{item.label}</label>)}</fieldset>}
         {restricted.length > 0 && <fieldset><legend><Bi en="Restricted evidence (only if needed)" bn="সীমিত প্রমাণ (প্রয়োজন হলেই)" /></legend>{restricted.map((item) => <label key={item.id} className="checkbox-label"><input type="checkbox" checked={sensitiveIds.includes(item.id)} onChange={() => setSensitiveIds(toggle(sensitiveIds, item.id))} />{item.label}</label>)}
           {sensitiveIds.length > 0 && <><label htmlFor="referral-sensitive-reason"><Bi en="Why this restricted evidence must be shared" bn="কেন এই সীমিত প্রমাণ পাঠাতেই হবে" /></label><textarea id="referral-sensitive-reason" value={sensitiveReason} onChange={(event) => setSensitiveReason(event.target.value)} minLength="10" maxLength="500" required /></>}
         </fieldset>}
-        <p className="muted"><Bi en="Only the named officer can open restricted items; each opening is logged. Contact rules go with it, the number does not." bn="সীমিত নথি শুধু নির্দিষ্ট কর্মকর্তা খুলতে পারবেন, প্রতিবার লগ হয়। যোগাযোগের নিয়ম যায়, নম্বর যায় না।" /></p>
+        <p className="muted"><Bi en="Only the named officer can open restricted items; each opening is logged. Contact rules go with it, the number does not." bn="শুধু নির্দিষ্ট কর্মকর্তা সংবেদনশীল নথি দেখতে পারবেন; প্রতিবার দেখার তথ্য সংরক্ষিত হবে। নিরাপদ যোগাযোগের নিয়ম পাঠানো হবে, ফোন নম্বর নয়।" /></p>
         <button type="submit"><Bi en="Send referral" bn="রেফারেল পাঠান" /></button>
       </form>
     </AddForm>}

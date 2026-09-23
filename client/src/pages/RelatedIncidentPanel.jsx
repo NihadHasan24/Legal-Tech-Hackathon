@@ -36,15 +36,15 @@ export default function RelatedIncidentPanel({ applicationId, token }) {
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
 
-  return <Panel id="incident-link-title" en="Related cases" bn="সম্পর্কিত মামলা" hint={groups && (groups.length ? bi(`${groups.length} group(s)`, `${num(groups.length)}টি দল`) : bi('None', 'নেই'))}>
-    <p className="muted"><Bi en="Linked, never merged. Only chosen evidence is shared." bn="শুধু যুক্ত, একীভূত নয়। বাছাই করা প্রমাণই শুধু ভাগ হয়।" /></p>
+  return <Panel id="incident-link-title" en="Related cases" bn="সম্পর্কিত মামলা" hint={groups && (groups.length ? bi(`${groups.length} group(s)`, `${num(groups.length)}টি মামলার গুচ্ছ`) : bi('None', 'নেই'))}>
+    <p className="muted"><Bi en="Linked, never merged. Only chosen evidence is shared." bn="মামলাগুলো সম্পর্কিত হিসেবে যুক্ত থাকবে, কিন্তু এক করা হবে না। শুধু নির্বাচিত প্রমাণ অন্য মামলায় দেখা যাবে।" /></p>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
     {groups?.length > 0 && <ul className="plain-list">{groups.map((group) => <li key={group.id}><div><Link to={`/incidents/${group.id}`}><strong>{group.title}</strong></Link><p className="muted"><Bi en={`${group.memberCount} cases · ${group.sharedEvidenceCount} shared evidence`} bn={`${num(group.memberCount)}টি মামলা · ${num(group.sharedEvidenceCount)}টি যৌথ প্রমাণ`} /></p></div></li>)}</ul>}
-    {groups?.length === 0 && <p><Bi en="Not linked to any group." bn="কোনো দলের সাথে যুক্ত নয়।" /></p>}
+    {groups?.length === 0 && <p><Bi en="Not linked to any group." bn="সম্পর্কিত মামলার কোনো গুচ্ছে এটি নেই।" /></p>}
     <AddForm en="Link cases" bn="মামলা যুক্ত করুন">
       <form onSubmit={create} className="form-stack inline-form">
-        <label htmlFor="incident-title"><Bi en="Group label" bn="দলের নাম" /></label><input id="incident-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength="3" maxLength="120" required />
+        <label htmlFor="incident-title"><Bi en="Group label" bn="সম্পর্কিত মামলার গুচ্ছের নাম" /></label><input id="incident-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength="3" maxLength="120" required />
         <label htmlFor="incident-member-ids"><Bi en="Two or more other accepted Application IDs" bn="আরও দুই বা ততোধিক গৃহীত আবেদন নম্বর" /></label><textarea id="incident-member-ids" value={otherIds} onChange={(event) => setOtherIds(event.target.value)} placeholder="APP-2026-000002, APP-2026-000003" required />
         <label htmlFor="incident-link-reason"><Bi en="Why these cases are related" bn="কেন সম্পর্কিত" /></label><textarea id="incident-link-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="10" maxLength="1000" required />
         <button type="submit" disabled={busy}><Bi en="Link cases, do not merge" bn="যুক্ত করুন, একীভূত নয়" /></button>

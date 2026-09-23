@@ -28,7 +28,7 @@ function CallRecording({ applicationId, token }) {
   }, [applicationId, token])
   return state === 'READY'
     ? <audio controls preload="metadata" src={url} aria-label={bi('Full call recording', 'পুরো কলের রেকর্ড')} />
-    : <p className="muted">{{ LOADING: bi('Loading recording…', 'রেকর্ড লোড হচ্ছে…'), NONE: bi('No recording stored.', 'কোনো রেকর্ড নেই।'), FAILED: bi('Recording could not load. Refresh to retry.', 'রেকর্ড লোড হয়নি। আবার চেষ্টা করুন।') }[state]}</p>
+    : <p className="muted">{{ LOADING: bi('Loading recording…', 'রেকর্ড লোড হচ্ছে…'), NONE: bi('No recording stored.', 'কোনো রেকর্ড নেই।'), FAILED: bi('Recording could not load. Refresh to retry.', 'কলের রেকর্ডিং খোলা যায়নি। পৃষ্ঠাটি আবার খুলে চেষ্টা করুন।') }[state]}</p>
 }
 
 // Submitted → reviewed → accepted, as one glanceable bar.
@@ -130,7 +130,7 @@ export default function RecordPage({ session }) {
     event.preventDefault()
     const path = selectedDocument ? `/api/documents/${selectedDocument.id}/versions` : `/api/applications/${applicationId}/documents`
     const result = await change(path, { label: docLabel, qualityState: docQuality, ...(docNote ? { note: docNote } : {}), ...(!selectedDocument && docRestricted ? { sensitivity: 'RESTRICTED' } : {}) },
-      selectedDocument ? bi('New version added.', 'নতুন সংস্করণ যোগ হয়েছে।') : docRestricted ? bi('Restricted evidence recorded. Only you can open it.', 'সীমিত প্রমাণ যোগ হয়েছে। শুধু আপনি খুলতে পারবেন।') : bi('Document added.', 'নথি যোগ হয়েছে।'))
+      selectedDocument ? bi('New version added.', 'নতুন সংস্করণ যোগ হয়েছে।') : docRestricted ? bi('Restricted evidence recorded. Only you can open it.', 'সংবেদনশীল প্রমাণটি নথিতে যোগ হয়েছে। আপাতত শুধু আপনি এটি দেখতে পারবেন।') : bi('Document added.', 'নথি যোগ হয়েছে।'))
     if (result) {
       setDocLabel('')
       setDocNote('')
@@ -150,12 +150,12 @@ export default function RecordPage({ session }) {
 
   async function submitContact(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: contactChannel, outcome: contactOutcome, reason: contactReason }, bi('Contact attempt logged. Nothing was sent.', 'যোগাযোগের চেষ্টা লেখা হয়েছে। কিছু পাঠানো হয়নি।'))
+    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: contactChannel, outcome: contactOutcome, reason: contactReason }, bi('Contact attempt logged. Nothing was sent.', 'যোগাযোগের চেষ্টাটি নথিভুক্ত হয়েছে। এখান থেকে কোনো বার্তা পাঠানো হয়নি।'))
     if (result) setContactReason('')
   }
 
   async function simulateUnknownAnswer() {
-    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call to the safe number: an unknown person answered.' }, bi('Nothing was disclosed. A safer follow-up task was created.', 'কিছু বলা হয়নি। নিরাপদ ফলো-আপের কাজ তৈরি হয়েছে।'))
+    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call to the safe number: an unknown person answered.' }, bi('Nothing was disclosed. A safer follow-up task was created.', 'মামলার কোনো তথ্য জানানো হয়নি। নিরাপদে আবার যোগাযোগের জন্য একটি কাজ তৈরি হয়েছে।'))
     if (result) setNeutralScript(result.neutralScript)
   }
 
@@ -196,7 +196,7 @@ export default function RecordPage({ session }) {
           </section>
           {officer && <section className="card safety-card" aria-labelledby="safe-title">
             <h2 id="safe-title"><Bi en="Safe contact" bn="নিরাপদ যোগাযোগ" /></h2>
-            {!data.safeContact ? <p><Bi en="No safe route recorded. Do not contact or share details." bn="নিরাপদ পথ লেখা নেই। যোগাযোগ করবেন না, কিছু জানাবেন না।" /></p> : <dl className="details compact">
+            {!data.safeContact ? <p><Bi en="No safe route recorded. Do not contact or share details." bn="কীভাবে নিরাপদে যোগাযোগ করা যাবে, তা নথিতে নেই। যোগাযোগ বা মামলার কোনো তথ্য প্রকাশ করবেন না।" /></p> : <dl className="details compact">
               <div><dt><Bi en="Use" bn="ব্যবহার করুন" /></dt><dd>{data.safeContact.allowedChannels.map(say).join(', ') || none()}</dd></div>
               <div><dt><Bi en="Never use" bn="কখনো নয়" /></dt><dd>{data.safeContact.prohibitedChannels.map(say).join(', ') || none()}</dd></div>
               <div><dt><Bi en="Safe time" bn="নিরাপদ সময়" /></dt><dd>{data.safeContact.safeTimeWindow || bi('Not recorded', 'লেখা নেই')}</dd></div>
@@ -209,7 +209,7 @@ export default function RecordPage({ session }) {
 
         <div className="card panels">
           {officer && record.status === 'SUBMITTED' && <Panel id="decision-title" en="Decision" bn="সিদ্ধান্ত" hint={say(record.reviewState)} open>
-            <p className="muted"><Bi en="1. Review, then 2. accept. Review is not proof of identity." bn="১. পর্যালোচনা, তারপর ২. গ্রহণ। পর্যালোচনা পরিচয়ের প্রমাণ নয়।" /></p>
+            <p className="muted"><Bi en="1. Review, then 2. accept. Review is not proof of identity." bn="প্রথমে আবেদনটি পর্যালোচনা করুন। তারপর গ্রহণের সিদ্ধান্ত নিন। শুধু পর্যালোচনা করলেই পরিচয় যাচাই হয়ে যায় না।" /></p>
             <div className="action-grid">
               <form onSubmit={submitReview} className="form-stack">
                 <h3><Bi en="1. Review" bn="১. পর্যালোচনা" /></h3>
@@ -247,7 +247,7 @@ export default function RecordPage({ session }) {
 
           {officer && <Panel id="priority-title" en="Priority" bn="অগ্রাধিকার" hint={record.priorityDecision ? say(record.priorityDecision) : record.urgencyReasons.length ? bi('Flagged, decide', 'চিহ্নিত, সিদ্ধান্ত দিন') : bi('Not set', 'নির্ধারিত নয়')} open={record.urgencyReasons.length > 0 && !record.priorityDecision}>
             <p className="muted"><Bi en="The system flags. You decide." bn="সিস্টেম চিহ্নিত করে, সিদ্ধান্ত আপনার।" /></p>
-            {record.urgencyReasons.length ? <><h3><Bi en="Why flagged" bn="কেন চিহ্নিত" /></h3><ul>{record.urgencyReasons.map((reason) => <li key={reason}>{tr(reason)}</li>)}</ul></> : <p><Bi en="No urgency signs recorded." bn="জরুরি কোনো লক্ষণ লেখা নেই।" /></p>}
+            {record.urgencyReasons.length ? <><h3><Bi en="Why flagged" bn="কেন চিহ্নিত" /></h3><ul>{record.urgencyReasons.map((reason) => <li key={reason}>{tr(reason)}</li>)}</ul></> : <p><Bi en="No urgency signs recorded." bn="জরুরি পরিস্থিতির কোনো ইঙ্গিত নথিতে নেই।" /></p>}
             <form onSubmit={submitPriority} className="form-stack inline-form">
               <label htmlFor="priority-decision"><Bi en="Priority decision" bn="অগ্রাধিকারের সিদ্ধান্ত" /></label><select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}><option value="URGENT">{say('URGENT')}</option><option value="ROUTINE">{say('ROUTINE')}</option></select>
               <label htmlFor="priority-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required />
@@ -266,7 +266,7 @@ export default function RecordPage({ session }) {
               <div><dt><Bi en="Statement confirmed" bn="বক্তব্য নিশ্চিত" /></dt><dd>{yesNo(record.assistance.originalConfirmed)}</dd></div>
               <div><dt><Bi en="Translation confirmed" bn="অনুবাদ নিশ্চিত" /></dt><dd>{yesNo(record.assistance.translationConfirmed)}</dd></div>
             </dl>
-            <p className="muted"><Bi en="Original and translation are kept apart. The helper's phone is not the applicant's." bn="মূল বক্তব্য ও অনুবাদ আলাদা রাখা হয়। সহায়তাকারীর ফোন আবেদনকারীর নয়।" /></p>
+            <p className="muted"><Bi en="Original and translation are kept apart. The helper's phone is not the applicant's." bn="আবেদনকারীর মূল বক্তব্য ও অনুবাদ আলাদা রাখা হয়েছে। সহায়তাকারীর ফোন নম্বর আবেদনকারীর যোগাযোগ নম্বর হিসেবে ব্যবহার করবেন না।" /></p>
           </Panel>}
 
           {officer && record.status === 'ACCEPTED' && <LawyerManagement applicationId={applicationId} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
@@ -274,25 +274,25 @@ export default function RecordPage({ session }) {
 
           <Panel id="docs-title" en="Documents" bn="নথি" hint={data.documents.length ? bi(`${data.documents.length} on file`, `${num(data.documents.length)}টি আছে`) : none()}>
             {data.documents.length === 0 && <p className="muted">{none()}</p>}
-            <ul className="plain-list">{data.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong>{document.sensitivity === 'RESTRICTED' && <> <Badge code="RESTRICTED" /></>}<p className="muted">{document.redacted ? <Bi en="No access. Opening is refused and logged." bn="অনুমতি নেই। খোলা যাবে না, চেষ্টা লগ হয়।" /> : <><Bi en="Version" bn="সংস্করণ" /> {num(document.currentVersion)}</>}</p></div>{!document.redacted && <button type="button" className="secondary-button" onClick={() => selectDocument(document)} aria-label={bi(`Versions of ${document.label}`, `${document.label}-এর সংস্করণ`)}><Bi en="Versions" bn="সংস্করণ" /></button>}</li>)}</ul>
+            <ul className="plain-list">{data.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong>{document.sensitivity === 'RESTRICTED' && <> <Badge code="RESTRICTED" /></>}<p className="muted">{document.redacted ? <Bi en="No access. Opening is refused and logged." bn="আপনার এই নথি দেখার অনুমতি নেই। খোলার চেষ্টা নথিভুক্ত হবে।" /> : <><Bi en="Version" bn="সংস্করণ" /> {num(document.currentVersion)}</>}</p></div>{!document.redacted && <button type="button" className="secondary-button" onClick={() => selectDocument(document)} aria-label={bi(`Versions of ${document.label}`, `${document.label}-এর সংস্করণ`)}><Bi en="Versions" bn="সংস্করণ" /></button>}</li>)}</ul>
             {selectedDocument && <div className="version-history"><h3><Bi en="Versions" bn="সংস্করণ" />: {selectedDocument.label}</h3><ol>{versions.map((version) => <li key={version.version}>{version.label} · <Term code={version.qualityState} />{version.note ? ` · ${version.note}` : ''}</li>)}</ol></div>}
             {officer && <AddForm en={selectedDocument ? 'Add a version' : 'Add document'} bn={selectedDocument ? 'সংস্করণ যোগ করুন' : 'নথি যোগ করুন'}>
               <form onSubmit={submitDocument} className="form-stack inline-form">
-                {selectedDocument && <button type="button" className="text-button" onClick={() => { setSelectedDocument(null); setVersions([]); setDocLabel('') }}><Bi en="New document instead" bn="বরং নতুন নথি" /></button>}
+                {selectedDocument && <button type="button" className="text-button" onClick={() => { setSelectedDocument(null); setVersions([]); setDocLabel('') }}><Bi en="New document instead" bn="নতুন নথি যোগ করুন" /></button>}
                 <label htmlFor="doc-label"><Bi en="Label" bn="নাম" /></label><input id="doc-label" value={docLabel} onChange={(event) => setDocLabel(event.target.value)} minLength="3" maxLength="160" required />
                 <label htmlFor="doc-quality"><Bi en="Quality" bn="মান" /></label><select id="doc-quality" value={docQuality} onChange={(event) => setDocQuality(event.target.value)}>{['PENDING_REVIEW', 'READABLE', 'UNREADABLE'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
                 <label htmlFor="doc-note"><Bi en="Note (optional)" bn="নোট (ঐচ্ছিক)" /></label><textarea id="doc-note" value={docNote} onChange={(event) => setDocNote(event.target.value)} maxLength="500" />
-                {!selectedDocument && <label className="checkbox-label" htmlFor="doc-restricted"><input id="doc-restricted" type="checkbox" checked={docRestricted} onChange={(event) => setDocRestricted(event.target.checked)} /><Bi en="Highly sensitive evidence: only me and people I authorise" bn="অতি সংবেদনশীল প্রমাণ: শুধু আমি ও অনুমোদিতরা" /></label>}
+                {!selectedDocument && <label className="checkbox-label" htmlFor="doc-restricted"><input id="doc-restricted" type="checkbox" checked={docRestricted} onChange={(event) => setDocRestricted(event.target.checked)} /><Bi en="Highly sensitive evidence: only me and people I authorise" bn="এই প্রমাণ খুব সংবেদনশীল; শুধু আমি ও আমার অনুমতি পাওয়া ব্যক্তিরা দেখতে পারবেন" /></label>}
                 <button type="submit" className="secondary-button">{selectedDocument ? <Bi en="Add version" bn="সংস্করণ যোগ করুন" /> : <Bi en="Add document" bn="নথি যোগ করুন" />}</button>
               </form>
             </AddForm>}
-            {officer && data.evidenceAccess.length > 0 && <div className="version-history"><h3><Bi en="Restricted access log" bn="সীমিত নথি খোলার লগ" /></h3><ol>{data.evidenceAccess.map((entry) => <li key={entry.id}><Badge code={entry.outcome} /> {entry.user} · {entry.document} · {when(entry.createdAt)}</li>)}</ol></div>}
+            {officer && data.evidenceAccess.length > 0 && <div className="version-history"><h3><Bi en="Restricted access log" bn="সংবেদনশীল নথি দেখার ইতিহাস" /></h3><ol>{data.evidenceAccess.map((entry) => <li key={entry.id}><Badge code={entry.outcome} /> {entry.user} · {entry.document} · {when(entry.createdAt)}</li>)}</ol></div>}
           </Panel>
 
           {officer && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={record.assistance.caseType} documents={data.documents} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
 
           <Panel id="contact-title" en="Contact log" bn="যোগাযোগের রেকর্ড" hint={data.contacts.length ? bi(`${data.contacts.length} attempts`, `${num(data.contacts.length)} বার চেষ্টা`) : none()}>
-            <p className="muted"><Bi en="A log only. Nothing is sent from here." bn="শুধু রেকর্ড। এখান থেকে কিছু পাঠানো হয় না।" /></p>
+            <p className="muted"><Bi en="A log only. Nothing is sent from here." bn="এখানে শুধু যোগাযোগের তথ্য নথিভুক্ত হয়; কোনো বার্তা পাঠানো হয় না।" /></p>
             {data.contacts.length === 0 && <p>{none()}</p>}
             <ul className="plain-list">{data.contacts.map((attempt) => <li key={attempt._id}><div><Badge code={attempt.outcome} /> <Term code={attempt.channel} /><p>{attempt.reason}</p><small>{when(attempt.createdAt)}</small></div></li>)}</ul>
             {officer && <AddForm en="Log attempt" bn="চেষ্টা লিখুন">
@@ -313,14 +313,14 @@ export default function RecordPage({ session }) {
           {officer && (record.channel === 'VOICE_SIM' || data.transcript) && <Panel id="call-title" en="Call" bn="কল" hint={data.transcript ? bi('Recording and transcript', 'রেকর্ড ও কথোপকথন') : bi('Recording', 'রেকর্ড')}>
             {record.channel === 'VOICE_SIM' && <><h3><Bi en="Recording" bn="রেকর্ড" /></h3><CallRecording applicationId={applicationId} token={session.token} /><p className="muted"><Bi en="The caller was told the call is recorded." bn="কলারকে রেকর্ডিংয়ের কথা জানানো হয়েছে।" /></p></>}
             {data.transcript && <><h3><Bi en="Transcript" bn="কথোপকথন" /></h3>
-              <p className="muted"><Bi en={`Machine transcript (${data.transcript.transcribedBy}), not a legal record.`} bn="যন্ত্রে লেখা, আইনি রেকর্ড নয়।" /></p>
+              <p className="muted"><Bi en={`Machine transcript (${data.transcript.transcribedBy}), not a legal record.`} bn="কথোপকথনটি যন্ত্রের সাহায্যে লেখা হয়েছে; এটি যাচাইকৃত আইনি নথি নয়।" /></p>
               <ol className="timeline">{data.transcript.turns.map((line, index) => <li key={index}><strong>{line.speaker === 'CALLER' ? <Bi en="Caller" bn="কলার" /> : <Bi en="Assistant" bn="সহকারী" />}</strong><p lang="bn">{line.text}</p></li>)}</ol>
             </>}
           </Panel>}
 
           {officer && <Panel id="facts-title" en="Facts and sources" bn="তথ্য ও উৎস" hint={data.facts.length ? bi(`${data.facts.length} facts`, `${num(data.facts.length)}টি তথ্য`) : none()}>
             {data.facts.length === 0 ? <p>{none()}</p> : <div className="table-wrap"><table>
-              <caption className="visually-hidden">{bi('Recorded facts and where each came from', 'লেখা তথ্য ও তার উৎস')}</caption>
+              <caption className="visually-hidden">{bi('Recorded facts and where each came from', 'নথিভুক্ত তথ্য এবং তথ্যের উৎস')}</caption>
               <thead><tr><th scope="col"><Bi en="Fact" bn="তথ্য" /></th><th scope="col"><Bi en="Value" bn="মান" /></th><th scope="col"><Bi en="Source" bn="উৎস" /></th><th scope="col"><Bi en="Confirmed by" bn="নিশ্চিত করেছেন" /></th></tr></thead>
               <tbody>{data.facts.map((fact) => <tr key={fact._id}>
                 <th scope="row"><Term code={fact.field} /></th>
@@ -332,7 +332,7 @@ export default function RecordPage({ session }) {
           </Panel>}
 
           <Panel id="history-title" en="History" bn="ইতিহাস" hint={events ? `${bi(`${events.length} events`, `${num(events.length)}টি ঘটনা`)} · ${integrity ? bi('check OK', 'যাচাই ঠিক') : bi('CHECK FAILED', 'যাচাই ব্যর্থ')}` : undefined} open={!officer}>
-            <p className={integrity ? 'muted' : 'error'}>{integrity ? bi('Integrity check passed (demo).', 'সত্যতা যাচাই ঠিক আছে (ডেমো)।') : bi('Integrity check FAILED. Review required.', 'সত্যতা যাচাই ব্যর্থ। পর্যালোচনা দরকার।')}</p>
+            <p className={integrity ? 'muted' : 'error'}>{integrity ? bi('Integrity check passed (demo).', 'নমুনা রেকর্ডের অখণ্ডতা যাচাইয়ে মিলেছে।') : bi('Integrity check FAILED. Review required.', 'সত্যতা যাচাই ব্যর্থ। পর্যালোচনা দরকার।')}</p>
             <ol className="timeline compact">{events?.map((event, index) => <li key={event._id ?? index}><strong><Term code={event.action} /></strong> <small><Term code={event.actorRole} /> · <time dateTime={event.createdAt}>{when(event.createdAt)}</time></small>{event.reason && <p>{tr(event.reason)}</p>}</li>)}</ol>
           </Panel>
         </div>

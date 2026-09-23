@@ -62,7 +62,7 @@ export async function loadDraft(id, ownerId, passphrase) {
   if (!row || row.ownerId !== ownerId) throw new Error(bi('Draft not found for this account.', 'এই অ্যাকাউন্টে খসড়াটি পাওয়া যায়নি।'))
   const cipher = bytes(row.cipher)
   const hash = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher)))
-  if (hash !== row.hash) throw new Error(bi('Local draft integrity check failed. Do not sync this draft.', 'খসড়ার সত্যতা যাচাই ব্যর্থ। এটি সিঙ্ক করবেন না।'))
+  if (hash !== row.hash) throw new Error(bi('Local draft integrity check failed. Do not sync this draft.', 'এই ডিভাইসে রাখা খসড়ার তথ্য বদলে গেছে। এটি সার্ভারে পাঠাবেন না।'))
   try {
     const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(row.iv) }, await key(passphrase, bytes(row.salt)), cipher)
     return { status: row.status, value: JSON.parse(decoder.decode(clear)), hashValid: true }
@@ -98,11 +98,11 @@ export async function loadSignaturePacket(id, ownerId, passphrase) {
   const row = await operation('readonly', (store) => store.get(id), SIGNATURE_STORE)
   if (!row || row.ownerId !== ownerId) throw new Error(bi('Offline signature not found for this account.', 'এই অ্যাকাউন্টে অফলাইন স্বাক্ষরটি পাওয়া যায়নি।'))
   const cipher = bytes(row.cipher)
-  if (hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher))) !== row.hash) throw new Error(bi('Offline signature integrity check failed. Do not sync it.', 'অফলাইন স্বাক্ষরের সত্যতা যাচাই ব্যর্থ। এটি সিঙ্ক করবেন না।'))
+  if (hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher))) !== row.hash) throw new Error(bi('Offline signature integrity check failed. Do not sync it.', 'এই ডিভাইসে রাখা স্বাক্ষরের তথ্য বদলে গেছে। এটি সার্ভারে পাঠাবেন না।'))
   try {
     const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(row.iv) }, await key(passphrase, bytes(row.salt)), cipher)
     return JSON.parse(decoder.decode(clear))
-  } catch { throw new Error(bi('Signing passphrase is incorrect or the queued signature is damaged.', 'পাসফ্রেজ ভুল, বা সারির স্বাক্ষরটি নষ্ট হয়েছে।')) }
+  } catch { throw new Error(bi('Signing passphrase is incorrect or the queued signature is damaged.', 'পাসফ্রেজ ভুল, অথবা এই ডিভাইসে রাখা স্বাক্ষরটি নষ্ট হয়েছে।')) }
 }
 
 export async function removeSignaturePacket(id, ownerId) {
