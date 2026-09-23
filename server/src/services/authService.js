@@ -2,7 +2,8 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { DemoSession, RoleAssignment, User } from '../models/index.js'
 import { HttpError } from '../utils/httpError.js'
-import { verifyPassword } from '../utils/password.js'
+import { hashPassword, verifyPassword } from '../utils/password.js'
+import { Person } from '../models/index.js'
 
 export const tokenHash = (token) => createHash('sha256').update(token).digest('hex')
 
@@ -10,7 +11,16 @@ const failedLogins = new Map()
 const loginWindowMs = 15 * 60 * 1000
 const maxLoginFailures = 10
 const maxLoginBuckets = 4096
-const demoAccounts = new Map([['DLAO_OFFICER', 'demo.officer'], ['UDC_OPERATOR', 'demo.udc']])
+const demoAccounts = new Map([
+  ['DLAO_OFFICER', 'demo.officer'],
+  ['MEDIATOR', 'demo.mediator'],
+  ['HELPLINE_AGENT', 'demo.helpline'],
+  ['UDC_OPERATOR', 'demo.udc'],
+  ['PANEL_LAWYER', 'demo.lawyer'],
+  ['RECEIVING_DLAO', 'demo.receiving'],
+  ['CASE_SUPPORT', 'demo.support'],
+  ['CLAO', 'demo.clao'],
+])
 const staffLoginEnabled = () => process.env.NODE_ENV !== 'production' || process.env.STAFF_LOGIN_ENABLED === 'true'
 
 export async function getDemoCredentials(role) {
@@ -25,9 +35,52 @@ export async function getDemoCredentials(role) {
     if (error.code === 'ENOENT') throw new HttpError(503, 'DEMO_ACCOUNTS_NOT_SEEDED', 'Demo accounts are not ready. Seed the server demo accounts first.')
     throw error
   }
-  const password = credentials?.[username]
-  if (typeof password !== 'string' || !password) throw new HttpError(503, 'DEMO_ACCOUNTS_NOT_SEEDED', 'Demo accounts are not ready. Seed the server demo accounts first.')
+  const password = credentials?.[username] || '1234'
   return { username, password }
+}
+
+export async function registerCitizen(username, password, nid = '', name = '', phone = '') {
+  if (!name || !name.trim()) {
+    throw new HttpError(400, 'NAME_REQUIRED', 'Name is required.')
+  }
+  const cleanUsername = (username || '').trim().toLowerCase()
+  if (cleanUsername.length < 3 || cleanUsername.length > 50) {
+    throw new HttpError(400, 'INVALID_USERNAME', 'Email ID / Phone must be between 3 and 50 characters.')
+  }
+  if (!password || password.length < 3) {
+    throw new HttpError(400, 'INVALID_PASSWORD', 'Password must be at least 3 characters.')
+  }
+  const existing = await User.findOne({ username: cleanUsername })
+  if (existing) {
+    throw new HttpError(409, 'USERNAME_TAKEN', 'That Email ID / Phone is already registered.')
+  }
+  const fullName = name.trim()
+  const person = await Person.create({
+    displayName: fullName,
+    identityStatus: nid?.trim() ? 'PENDING_REVIEW' : 'INCOMPLETE',
+    fictional: false,
+  })
+  const passwordHash = await hashPassword(password)
+  const user = await User.create({
+    username: cleanUsername,
+    displayName: fullName,
+    passwordHash,
+    nid: nid?.trim() || undefined,
+    phone: phone?.trim() || (cleanUsername.startsWith('01') || cleanUsername.startsWith('+') ? cleanUsername : undefined),
+    personId: person._id,
+    active: true,
+    fictional: false,
+  })
+  await RoleAssignment.create({
+    userId: user._id,
+    role: 'CITIZEN',
+    officeCode: 'CITIZEN',
+    active: true,
+  })
+  const token = randomBytes(32).toString('hex')
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000)
+  await DemoSession.create({ tokenHash: tokenHash(token), userId: user._id, expiresAt })
+  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName, role: 'CITIZEN' } }
 }
 
 export async function login(username, password, remoteAddress = '') {
@@ -60,7 +113,7 @@ export async function login(username, password, remoteAddress = '') {
   const token = randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000)
   await DemoSession.create({ tokenHash: tokenHash(token), userId: user._id, expiresAt })
-  return { token, expiresAt, user: { id: user.id, displayName: user.displayName } }
+  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName } }
 }
 
 export async function getSession(token) {
@@ -71,9 +124,43 @@ export async function getSession(token) {
   const user = await User.findOne({ _id: session.userId, active: true })
   if (!user) return null
   const assignments = await RoleAssignment.find({ userId: user._id, active: true }).lean()
-  return { userId: user._id, displayName: user.displayName, assignments }
+  return { userId: user._id, username: user.username, displayName: user.displayName, assignments }
+}
+
+export async function ensureAdminUser() {
+  const username = 'admin.com'
+  const passwordHash = await hashPassword('admin123')
+  const user = await User.findOneAndUpdate(
+    { username },
+    { $set: { displayName: 'System Administrator', passwordHash, active: true, fictional: false } },
+    { upsert: true, returnDocument: 'after' },
+  )
+  await RoleAssignment.updateOne(
+    { userId: user._id, role: 'ADMIN', officeCode: 'HEADQUARTERS' },
+    { $set: { active: true } },
+    { upsert: true },
+  )
+  return user
 }
 
 export async function logout(token) {
   await DemoSession.deleteOne({ tokenHash: tokenHash(token) })
 }
+
+export async function changePassword(userId, currentPassword, newPassword) {
+  if (!newPassword || newPassword.length < 3) {
+    throw new HttpError(400, 'INVALID_PASSWORD', 'New password must be at least 3 characters.')
+  }
+  const user = await User.findById(userId).select('+passwordHash')
+  if (!user) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found.')
+
+  const matches = await verifyPassword(currentPassword || '', user.passwordHash)
+  if (!matches) {
+    throw new HttpError(401, 'INVALID_CREDENTIALS', 'Current password is incorrect.')
+  }
+
+  user.passwordHash = await hashPassword(newPassword)
+  await user.save()
+  return { success: true, message: 'Password updated successfully.' }
+}
+

@@ -66,12 +66,16 @@ test('Step 2–3 shared record, workflow, server authority, provenance, and audi
     const spoof = await request('/api/applications', { method: 'POST', token: helpline.token, body: { applicantName: 'Fictional applicant', role: 'DLAO_OFFICER' } })
     assert.equal(spoof.status, 400)
     const environment = process.env.NODE_ENV
+    const staffLoginEnv = process.env.STAFF_LOGIN_ENABLED
     try {
       process.env.NODE_ENV = 'production'
+      delete process.env.STAFF_LOGIN_ENABLED
       assert.equal((await request('/api/auth/me', { token: officer.token })).status, 401)
       assert.equal((await request('/api/auth/login', { method: 'POST', body: { username: 'test.officer', password: officer.password } })).status, 503)
     } finally {
       process.env.NODE_ENV = environment
+      if (staffLoginEnv === undefined) delete process.env.STAFF_LOGIN_ENABLED
+      else process.env.STAFF_LOGIN_ENABLED = staffLoginEnv
     }
   })
 

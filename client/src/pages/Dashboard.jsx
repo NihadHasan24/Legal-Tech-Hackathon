@@ -99,7 +99,17 @@ export default function Dashboard({ session }) {
   if (!role) return <p role="alert">{bi('No active provider role is assigned to this account.', 'এই অ্যাকাউন্টে কোনো সক্রিয় ভূমিকা নেই।')}</p>
   const staff = role === 'DLAO_OFFICER' || role === 'CASE_SUPPORT'
   const canSubmit = staff || role === 'HELPLINE_AGENT' || role === 'UDC_OPERATOR'
-  const visible = workspace?.records.filter((record) => (queue === 'ALL' || record.flags?.some((flag) => flag.code === queue)) && (!filter || [record.applicationId, record.caseId, record.applicantName].some((value) => value?.toLowerCase().includes(filter.toLowerCase())))) || []
+  const isUrgent = (record) => record.priorityDecision === 'URGENT' || (record.priorityDecision !== 'ROUTINE' && record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION'))
+  const isPending = (record) => !isUrgent(record) && record.status !== 'ACCEPTED'
+  const filtered = workspace?.records.filter((record) => (queue === 'ALL' || record.flags?.some((flag) => flag.code === queue)) && (!filter || [record.applicationId, record.caseId, record.applicantName].some((value) => value?.toLowerCase().includes(filter.toLowerCase())))) || []
+  const visible = [...filtered].sort((a, b) => {
+    const aUrgent = isUrgent(a) ? 1 : 0
+    const bUrgent = isUrgent(b) ? 1 : 0
+    if (bUrgent !== aUrgent) return bUrgent - aUrgent
+    const aPending = isPending(a) ? 1 : 0
+    const bPending = isPending(b) ? 1 : 0
+    return bPending - aPending
+  })
   const report = workspace?.report
 
   return <section aria-labelledby="dashboard-title">
@@ -129,7 +139,7 @@ export default function Dashboard({ session }) {
         ? <Link to={`/cases/${record.caseId}`}><strong>{record.caseId} · {say(record.assignmentStatus)}</strong><span>{bi('Application', 'আবেদন')} {record.applicationId}{record.nextAction ? ` · ${bi('Next:', 'পরবর্তী:')} ${record.nextAction}` : ''}</span>{record.nextHearingAt && <small>{bi('Hearing:', 'শুনানি:')} {when(record.nextHearingAt)}</small>}{record.updates?.map((update) => <small key={update.id}>{bi('Update', 'আপডেট')} {num(update.sequence)}: {say(update.status)} · {bi('due', 'শেষ সময়')} {when(update.dueAt)}</small>)}</Link>
         : role === 'RECEIVING_DLAO'
           ? <Link to={`/referrals/${record.referralId}`}><strong>{record.caseId}</strong><span>{bi(`Referral from ${record.sendingOfficeCode}`, `${record.sendingOfficeCode} থেকে রেফারেল`)} · {say(record.status)}</span><small>{bi('Acknowledge by', 'প্রাপ্তি স্বীকারের শেষ সময়')} {when(record.dueAt)}{record.overdue ? ` · ${bi('acknowledgement overdue', 'প্রাপ্তি স্বীকার বাকি')}` : ''}</small></Link>
-          : <Link to={`/applications/${record.applicationId}`}><strong>{record.applicationId}</strong><span>{tr(record.applicantName)} · {say(record.status)} · {say(record.reviewState)}</span>{record.caseId && <small>{record.caseId}</small>}{record.flags?.map((flag) => <small key={flag.code}>{say(flag.code)}: {tr(flag.reason)}</small>)}</Link>}</li>)}</ul>}
+          : <Link to={`/applications/${record.applicationId}`} className={isUrgent(record) ? 'urgent-record' : isPending(record) ? 'pending-record' : ''}><strong>{record.applicationId}</strong><span>{tr(record.applicantName)} · {say(record.status)} · {say(record.reviewState)}</span>{record.caseId && <small>{record.caseId}</small>}{isUrgent(record) && <small className="urgent-flag">{say('URGENT')}</small>}{record.flags?.filter((flag) => flag.code !== 'URGENT_RECOMMENDATION').map((flag) => <small key={flag.code}>{say(flag.code)}: {tr(flag.reason)}</small>)}</Link>}</li>)}</ul>}
     </section>
   </section>
 }

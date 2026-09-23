@@ -6,7 +6,7 @@ export async function submit(request, response) {
 }
 
 export async function submitVoice(request, response) {
-  response.status(201).json(await submitVoiceIntake(request.body))
+  response.status(201).json(await submitVoiceIntake(request.body, request.auth))
 }
 
 export async function storeRecording(request, response) {

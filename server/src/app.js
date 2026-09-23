@@ -14,6 +14,7 @@ import lawyerRoutes from './routes/lawyerRoutes.js'
 import incidentRoutes from './routes/incidentRoutes.js'
 import triageRoutes from './routes/triageRoutes.js'
 import mediationRoutes from './routes/mediationRoutes.js'
+import citizenRoutes from './routes/citizenRoutes.js'
 import { errorHandler, notFound } from './middleware/errors.js'
 
 const app = express()
@@ -72,6 +73,7 @@ app.use('/api/lawyers', lawyerRoutes)
 app.use('/api', triageRoutes)
 app.use('/api', mediationRoutes)
 app.use('/api', incidentRoutes)
+app.use('/api/citizen', citizenRoutes)
 
 if (process.env.NODE_ENV === 'production') {
   const clientBuild = fileURLToPath(new URL('../../client/dist/', import.meta.url))

@@ -10,6 +10,18 @@ export async function requireAuth(request, _response, next) {
   next()
 }
 
+export async function optionalAuth(request, _response, next) {
+  const match = /^Bearer ([a-f0-9]{64})$/.exec(request.get('authorization') || '')
+  if (match) {
+    const auth = await getSession(match[1])
+    if (auth) {
+      request.auth = auth
+      request.token = match[1]
+    }
+  }
+  next()
+}
+
 export function requireRole(...roles) {
   return (request, _response, next) => {
     if (!request.auth?.assignments.some((assignment) => roles.includes(assignment.role))) {
