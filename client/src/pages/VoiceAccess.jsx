@@ -20,11 +20,16 @@ const copy = {
   listening: 'শুনছি… বলা শেষ হলে # চাপুন।',
   transcribing: 'আপনার কথা বোঝা হচ্ছে…',
   submitting: 'আবেদন জমা হচ্ছে…',
-  micDenied: 'মাইক্রোফোন চালু করা যায়নি। কিপ্যাডে বা লিখে উত্তর দিন।',
+  micDenied: 'মাইক্রোফোন চালু করা যায়নি। এই কল শুরু করতে মাইক্রোফোনের অনুমতি দিন।',
   voiceOff: 'ভয়েস বোঝার সেবা এখন পাওয়া যাচ্ছে না। লিখে উত্তর দিন; আপনার উত্তরগুলো রাখা আছে।',
   urgent: 'আপনার নিরাপত্তাই আগে। শুধু যোগাযোগের তথ্য নেব, একজন কর্মী ফোন করবেন। তাৎক্ষণিক বিপদে ৯৯৯-এ ফোন করুন।',
   representative: 'এগুলো প্রতিনিধির দেওয়া তথ্য; আবেদনকারী নিজে নিশ্চিত না করা পর্যন্ত এভাবেই থাকবে।',
   failed: 'জমা দেওয়া যায়নি; আপনার উত্তরগুলো রাখা আছে। আবার ১ চাপুন।',
+  uploading: 'আবেদন জমা হয়েছে। কলের রেকর্ডিং সংরক্ষণ হচ্ছে; এই পৃষ্ঠা খোলা রাখুন।',
+  recordingFailed: 'আবেদন জমা হয়েছে, কিন্তু কলের রেকর্ডিং সংরক্ষণ হয়নি। এই পৃষ্ঠা খোলা রেখে আবার চেষ্টা করুন।',
+  recordingMissing: 'আবেদন জমা হয়েছে, কিন্তু কলের রেকর্ডিং পাওয়া যায়নি। আবেদন নম্বর লিখে রাখুন এবং কর্মীর সাহায্য নিন।',
+  recordingUnavailable: 'আবেদন জমা হয়েছে, কিন্তু কলের রেকর্ডিং সংরক্ষণ করা যায়নি। আবেদন নম্বর লিখে রাখুন এবং কর্মীর সাহায্য নিন।',
+  retryRecording: 'রেকর্ডিং আবার পাঠান',
   review: 'একজন লিগ্যাল এইড কর্মকর্তা আবেদনটি দেখে যোগাযোগ করবেন।',
   callback: 'একজন কর্মী আপনার দেওয়া নিরাপদ নম্বরে, নিরাপদ সময়ে ফোন করবেন।',
   code: 'স্ট্যাটাস জানার গোপন কোড',
@@ -143,6 +148,7 @@ export default function VoiceAccess() {
   const [micOpen, setMicOpen] = useState(false)
   const [recordings, setRecordings] = useState({})
   const [submission, setSubmission] = useState({ status: 'IDLE' })
+  const [starting, setStarting] = useState(false)
   const promptRef = useRef(null)
   const streamRef = useRef(null)
   const callRecorderRef = useRef(null)
@@ -156,9 +162,10 @@ export default function VoiceAccess() {
   const introsRef = useRef(null)
   const missesRef = useRef({ field: null, count: 0 })
   const transcriptRef = useRef([])
+  const pendingRecordingRef = useRef(null)
   const field = call ? nextField(call) : undefined
   const kind = kindOf(field)
-  const done = submission.status === 'DONE'
+  const done = ['DONE', 'UPLOADING_RECORDING', 'RECORDING_FAILED'].includes(submission.status)
   const turn = call ? `${call.mode}:${field ?? 'READBACK'}:${done}:${attempt}` : 'IDLE'
   // Mode and typed digits belong to the question they were set for, so a new question starts clean. Without voice
   // understanding or a microphone, a spoken question opens straight into the typed answer.
@@ -179,7 +186,7 @@ export default function VoiceAccess() {
     const intro = field && (call.mode === 'INTAKE' ? 'greeting' : 'urgentHandoff')
     const intros = intro && !introsRef.current.has(intro) && (call.mode === 'CALLBACK' || field === 'urgent') ? [intro] : []
     intros.forEach((clip) => introsRef.current.add(clip))
-    const clips = [...leadRef.current, ...intros, done ? 'submitted' : field ?? 'readback']
+    const clips = [...leadRef.current, ...intros, ...(done ? submission.status === 'DONE' ? ['submitted'] : [] : [field ?? 'readback'])]
     leadRef.current = []
     const finished = lightMode() || await playerRef.current.play(clips)
     if (finished && run === runRef.current && !done) listen()
@@ -319,26 +326,34 @@ export default function VoiceAccess() {
 
   async function placeCall() {
     const callId = ++callIdRef.current
-    toneRef.current?.close()
-    toneRef.current = new AudioContext()
-    playerRef.current = createClipPlayer()
-    introsRef.current = new Set()
-    setVoiceOff(false)
-    transcriptRef.current = []
-    leadRef.current = []
-    setRecordings({})
-    setSubmission({ status: 'IDLE' })
+    setStarting(true)
     setNotice(null)
-    setAttempt(0)
-    setCall(startCall())
+    let stream
     try {
-      const stream = await openMicrophone()
+      stream = await openMicrophone()
       if (callId !== callIdRef.current) return closeMicrophone(stream) // hung up while the permission prompt was open
+      toneRef.current?.close()
+      toneRef.current = new AudioContext()
+      playerRef.current = createClipPlayer()
+      introsRef.current = new Set()
+      setVoiceOff(false)
+      transcriptRef.current = []
+      leadRef.current = []
+      pendingRecordingRef.current = null
+      setRecordings({})
+      setSubmission({ status: 'IDLE' })
+      setAttempt(0)
       streamRef.current = stream
       callRecorderRef.current = startRecording(stream)
       setMicOpen(true)
+      setCall(startCall())
     } catch {
+      closeMicrophone(stream)
+      streamRef.current = callRecorderRef.current = null
+      toneRef.current?.close()
       setNotice(copy.micDenied)
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -348,10 +363,16 @@ export default function VoiceAccess() {
     runRef.current += 1
     playerRef.current?.stop()
     cancelAnswer()
-    const clip = await callRecorderRef.current?.stop()
-    closeMicrophone(streamRef.current)
-    streamRef.current = callRecorderRef.current = null
-    setMicOpen(false)
+    let clip
+    try {
+      clip = await callRecorderRef.current?.stop()
+    } catch {
+      clip = null
+    } finally {
+      closeMicrophone(streamRef.current)
+      streamRef.current = callRecorderRef.current = null
+      setMicOpen(false)
+    }
     return clip
   }
 
@@ -369,10 +390,22 @@ export default function VoiceAccess() {
     } catch {
       return setSubmission({ status: 'FAILED' })
     }
-    setSubmission({ status: 'DONE', applicationId: result.applicationId, lookupCode: result.lookupCode })
+    setSubmission({ status: 'UPLOADING_RECORDING', applicationId: result.applicationId, lookupCode: result.lookupCode })
     const clip = await finishRecording()
-    // The call audio joins the same record, proven by the one-time status code. A failed upload never undoes the application.
-    if (clip?.size) api(`/api/voice/intakes/${result.applicationId}/recording`, { method: 'POST', audio: clip, headers: { 'x-lookup-code': result.lookupCode } }).catch(() => {})
+    pendingRecordingRef.current = clip?.size ? clip : null
+    if (!pendingRecordingRef.current) return setSubmission({ ...result, status: 'RECORDING_FAILED', retryable: false })
+    await uploadRecording(result)
+  }
+
+  async function uploadRecording({ applicationId, lookupCode }) {
+    setSubmission({ applicationId, lookupCode, status: 'UPLOADING_RECORDING' })
+    try {
+      await api(`/api/voice/intakes/${applicationId}/recording`, { method: 'POST', audio: pendingRecordingRef.current, headers: { 'x-lookup-code': lookupCode } })
+      pendingRecordingRef.current = null
+      setSubmission({ applicationId, lookupCode, status: 'DONE' })
+    } catch (failure) {
+      setSubmission({ applicationId, lookupCode, status: 'RECORDING_FAILED', retryable: ![403, 409, 413].includes(failure.status) })
+    }
   }
 
   const hints = { '*': copy.repeatKey }
@@ -387,7 +420,7 @@ export default function VoiceAccess() {
       </header>
 
       {!call
-        ? <button type="button" className="call-button" onClick={placeCall}><PhoneIcon />{copy.call}</button>
+        ? <><button type="button" className="call-button" onClick={placeCall} disabled={starting}><PhoneIcon />{copy.call}</button>{notice && <p role="alert" className="error">{notice}</p>}</>
         : <div className="call-card">
           {!done && <div className="call-status">
             {micOpen && <span className="call-rec"><span className="call-rec-dot" aria-hidden="true" />{copy.recording}</span>}
@@ -407,7 +440,10 @@ export default function VoiceAccess() {
               <p>{call.mode === 'CALLBACK' ? copy.callback : copy.review}</p>
               <p className="call-code">{copy.code}: <strong lang="en" translate="no">{submission.lookupCode}</strong></p>
               <p className="muted">{copy.codeNote}</p>
-              <button type="button" className="secondary-button" onClick={() => setCall(null)}>{copy.newCall}</button>
+              {submission.status === 'UPLOADING_RECORDING' && <p role="status">{copy.uploading}</p>}
+              {submission.status === 'RECORDING_FAILED' && <p role="alert" className="error">{!pendingRecordingRef.current ? copy.recordingMissing : submission.retryable ? copy.recordingFailed : copy.recordingUnavailable}</p>}
+              {submission.status === 'RECORDING_FAILED' && submission.retryable && <button type="button" className="secondary-button" onClick={() => uploadRecording(submission)}>{copy.retryRecording}</button>}
+              {submission.status === 'DONE' && <button type="button" className="secondary-button" onClick={() => setCall(null)}>{copy.newCall}</button>}
             </div>
             : <div className="call-turn">
               <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{field ? steps[field].prompt : copy.readback}</h2>

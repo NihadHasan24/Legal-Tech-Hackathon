@@ -53,20 +53,20 @@ function SignIn({ onLogin }) {
       <h1 id="welcome-title">One record, every handover.</h1>
       <p className="citizen-door">Need voice support? <Link to="/voice">Start a voice intake</Link></p>
       <form onSubmit={submit} className="form-stack">
-        <label htmlFor="username">Demo username</label>
+        <label htmlFor="username">{import.meta.env.PROD ? 'Staff username' : 'Demo username'}</label>
         <input id="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required />
-        <label htmlFor="password">Demo password</label>
+        <label htmlFor="password">{import.meta.env.PROD ? 'Staff password' : 'Demo password'}</label>
         <input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
         {error && <p role="alert" className="error">{error}</p>}
         <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        <fieldset className="demo-roles">
+        {!import.meta.env.PROD && <fieldset className="demo-roles">
           <legend>Quick fill a role</legend>
           <div className="demo-role-buttons">
             <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('DLAO_OFFICER', 'DLAO Officer')}>DLAO Officer</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('UDC_OPERATOR', 'UDC Operator')}>UDC Operator</button>
           </div>
           <p role="status" className="visually-hidden">{status}</p>
-        </fieldset>
+        </fieldset>}
       </form>
     </section>
   )

@@ -1,6 +1,6 @@
 # Permissions — Steps 2–11 prototype
 
-Demo accounts authenticate with a 30-minute bearer session. Each request reloads active role assignments from MongoDB; browser-supplied roles are ignored. Demo login and session access are disabled in `NODE_ENV=production`. These are fictional accounts only, not a public identity system.
+Demo accounts authenticate with a 30-minute bearer session. Each request reloads active role assignments from MongoDB; browser-supplied roles are ignored. Login and session access in `NODE_ENV=production` require `STAFF_LOGIN_ENABLED=true`, while the quick-fill credential endpoint stays disabled. These are fictional accounts only, not a public identity system.
 
 | Operation | Current server permission |
 | --- | --- |
@@ -25,7 +25,7 @@ Demo accounts authenticate with a 30-minute bearer session. Each request reloads
 | Referral acknowledgement overdue | Server timer (`SYSTEM`): after the deadline passes unacknowledged, it creates one follow-up task and audit event per referral |
 | Submit 16699 voice-simulation intake (`POST /api/voice/intakes`) | Public, no sign-in; strict field schema, 20 submissions per IP per 10 minutes. Response contains the new Application ID and one-time displayed lookup code. Provenance is set by the server, and writes are attributed to a disabled automated-channel account |
 | Transcribe one spoken answer (`POST /api/voice/answers`) | Public, rate-limited, max 2 MB of audio, and only for questions already asked. The audio is transcribed and discarded, never written to disk or the database. The API key stays server-side, and the reply holds only the transcript plus values for approved fields. Returns 503 when voice AI is off |
-| Attach the full call recording (`POST /api/voice/intakes/:applicationId/recording`) | Public, rate-limited, max 8 MB of audio, once per application, within 15 minutes of submission, and only with that submission's one-time status code (`x-lookup-code`). Audited with size and SHA-256 |
+| Attach the full call recording (`POST /api/voice/intakes/:applicationId/recording`) | Public, rate-limited, max 8 MB of audio, once per application, within 15 minutes of submission, and only with that submission's one-time status code (`x-lookup-code`). An identical retry returns success without a second recording or audit event. Audited with size and SHA-256 |
 | Play the call recording / read the voice transcript | Owning-office DLAO officer only. Every call is recorded under the greeting's notice (project decision 2026-09-23); no opt-out is offered |
 | AI-extracted answers | The model only proposes values for questions already asked; the browser and then the server re-check each one against the same script. The model cannot set provenance, confirmation, or any role |
 | Log contact attempt (including simulated unknown-person answer) | Owning-office DLAO officer; an unknown-person outcome returns neutral wording only and creates a safer follow-up task |

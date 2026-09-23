@@ -2,7 +2,7 @@
 
 ## Application shape
 
-The prototype is a React/Vite browser app with an Express 5 API and MongoDB via Mongoose. API requests flow through route-level authentication/role checks and validation, then controllers and domain services. The client uses same-origin `/api` requests; Vite proxies them during local development.
+The prototype is a React/Vite browser app with an Express 5 API and MongoDB via Mongoose. API requests flow through route-level authentication/role checks and validation, then controllers and domain services. The client uses same-origin `/api` requests by default (Vite proxies them during local development); `VITE_API_ORIGIN` points a separately hosted client at the API.
 
 `Application` is the authoritative intake record. A unique Application ID is allocated at submission. Only a DLAO officer's authorised acceptance creates its linked `Case` and Case ID. Facts, consent, representation, safe-contact versions, tasks, contact attempts, documents, referrals, and audit events stay attached to that record graph rather than being copied into persona-specific cases. MongoDB transactions and unique indexes protect multi-record writes and IDs.
 
@@ -14,7 +14,7 @@ Application audit events are append-oriented, sequenced, and SHA-256 chained. Th
 
 The PWA caches only its static shell. Encrypted IndexedDB drafts use mutation IDs for retry deduplication; stale server versions surface a conflict for a human decision. Browser-local encryption does not protect against a compromised device or a user who shares the passphrase.
 
-In production, Express serves the Vite `client/dist` build from the same origin as `/api`. Extensionless HTML routes fall back to the app shell, while `/api` and `/health` remain API-only. The shell/assets receive a separate CSP that permits same-origin scripts/styles/API calls, the service worker, and blob-backed audio playback; API responses keep the stricter API CSP and `no-store`. No permissive CORS middleware is enabled. Run `npm run check:production-static` to build and smoke-test this packaging locally.
+In production, Express can serve the Vite `client/dist` build from the same origin as `/api`. Extensionless HTML routes fall back to the app shell, while `/api` and `/health` remain API-only. The shell/assets receive a separate CSP that permits same-origin scripts/styles/API calls, the service worker, and blob-backed audio playback; API responses keep the stricter API CSP and `no-store`. For the planned Vercel/Render split, Vercel serves the static shell and Render serves the API. Render allows cross-origin requests only from the exact `CLIENT_ORIGIN`; Vercel must separately configure static security headers, including a CSP with its Render API origin. Run `npm run check:production-static` to check the same-origin packaging locally.
 
 ## AI and external systems
 
@@ -26,4 +26,4 @@ The web voice route is a simulation. Real 16699 telephony, government identity, 
 
 Local development uses the dedicated `dlas_hackathon_dev` MongoDB Atlas database configured only in ignored `server/.env`; `server/.env.example` lists variable names without credentials. Fictional demo-user credentials are generated in ignored `server/.demo-credentials.json`. The seed is repeatable. Automated database tests use separately named random test databases and refuse to drop a database outside that test-name pattern.
 
-There is no public deployment yet. The API binds to loopback in development and to all interfaces in production by default (overridable with `HOST`), as hosting platforms require. Production demo authentication remains disabled. A public deployment still needs an authenticated persistent-Node host, HTTPS, secrets configured in that host, a human-approved access model, and a health check against the connected database. TLS/HSTS must be supplied by the host or its trusted proxy. Login throttling is process-local and needs a shared limiter before horizontal scaling. Do not use real beneficiary data in this prototype.
+There is no public deployment yet. The API binds to loopback in development and to all interfaces in production by default (overridable with `HOST`), as hosting platforms require. Production staff sign-in remains disabled unless `STAFF_LOGIN_ENABLED=true` is set; the local quick-fill credential endpoint stays disabled in production. These are fictional seeded accounts, not a real staff identity system. A public deployment still needs HTTPS, host-managed secrets, a human-approved access model, and a health check against the connected database. TLS/HSTS must be supplied by the host or its trusted proxy. Login throttling is process-local and needs a shared limiter before horizontal scaling. Do not use real beneficiary data in this prototype.

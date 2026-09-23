@@ -11,6 +11,7 @@ const loginWindowMs = 15 * 60 * 1000
 const maxLoginFailures = 5
 const maxLoginBuckets = 4096
 const demoAccounts = new Map([['DLAO_OFFICER', 'demo.officer'], ['UDC_OPERATOR', 'demo.udc']])
+const staffLoginEnabled = () => process.env.NODE_ENV !== 'production' || process.env.STAFF_LOGIN_ENABLED === 'true'
 
 export async function getDemoCredentials(role) {
   if (process.env.NODE_ENV === 'production') throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Demo authentication is disabled in production.')
@@ -30,7 +31,7 @@ export async function getDemoCredentials(role) {
 }
 
 export async function login(username, password, remoteAddress = '') {
-  if (process.env.NODE_ENV === 'production') throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Demo authentication is disabled in production.')
+  if (!staffLoginEnabled()) throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Staff sign-in is disabled on this server.')
   const key = createHash('sha256').update(`${remoteAddress}\0${username.toLowerCase()}`).digest('hex')
   const now = Date.now()
   let failures = failedLogins.get(key)
@@ -63,7 +64,7 @@ export async function login(username, password, remoteAddress = '') {
 }
 
 export async function getSession(token) {
-  if (process.env.NODE_ENV === 'production') return null
+  if (!staffLoginEnabled()) return null
   if (!/^[a-f0-9]{64}$/.test(token || '')) return null
   const session = await DemoSession.findOne({ tokenHash: tokenHash(token), expiresAt: { $gt: new Date() } })
   if (!session) return null

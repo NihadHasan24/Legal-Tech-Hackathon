@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api } from '../services/api.js'
+import { api, apiUrl } from '../services/api.js'
 import DocumentReview from './DocumentReview.jsx'
 import ReferralPanel from './ReferralPanel.jsx'
 import LawyerManagement from './LawyerManagement.jsx'
@@ -19,7 +19,7 @@ function CallRecording({ applicationId, token }) {
   useEffect(() => {
     const controller = new AbortController()
     let objectUrl
-    fetch(`/api/applications/${applicationId}/recording`, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal })
+    fetch(apiUrl(`/api/applications/${applicationId}/recording`), { headers: { authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal })
       .then((response) => (response.ok ? response.blob() : Promise.reject(response.status)))
       .then((blob) => { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); setState('READY') })
       .catch((failure) => { if (failure?.name !== 'AbortError') setState(failure === 404 ? 'NONE' : 'FAILED') })

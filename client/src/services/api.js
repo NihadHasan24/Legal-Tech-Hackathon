@@ -1,5 +1,7 @@
+export const apiUrl = (path) => `${(import.meta.env.VITE_API_ORIGIN || '').replace(/\/$/, '')}${path}`
+
 export async function api(path, { token, body, audio, headers, signal, method = 'GET' } = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     method,
     signal,
     cache: 'no-store',

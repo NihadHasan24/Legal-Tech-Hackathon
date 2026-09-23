@@ -177,8 +177,12 @@ export async function storeCallRecording(applicationId, code, audio, mimeType) {
     const expected = Buffer.from(application?.lookupCodeHash ?? '0'.repeat(64), 'hex')
     const matches = timingSafeEqual(expected, Buffer.from(lookupHash(code), 'hex'))
     if (!application || !matches || Date.now() - application.createdAt.getTime() > RECORDING_UPLOAD_WINDOW_MS) throw new HttpError(403, 'FORBIDDEN', 'This call recording cannot be attached.')
-    if (await CallRecording.exists({ applicationId }).session(session)) throw new HttpError(409, 'ALREADY_STORED', 'This call recording is already stored.')
     const sha256 = createHash('sha256').update(audio).digest('hex')
+    const existing = await CallRecording.findOne({ applicationId }).session(session)
+    if (existing) {
+      if (existing.sha256 === sha256) return { applicationId, bytes: existing.bytes }
+      throw new HttpError(409, 'ALREADY_STORED', 'This call recording is already stored.')
+    }
     const updated = await advance(application, session)
     const [recording] = await CallRecording.create([{ applicationId, mimeType, bytes: audio.length, sha256, audio }], { session })
     await appendAudit({
