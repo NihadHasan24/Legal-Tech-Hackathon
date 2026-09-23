@@ -1,6 +1,6 @@
 # Permissions — Steps 2–11 prototype
 
-Demo accounts authenticate with a 30-minute bearer session. Each request reloads active role assignments from MongoDB; browser-supplied roles are ignored. Login and session access in `NODE_ENV=production` require `STAFF_LOGIN_ENABLED=true`, while the quick-fill credential endpoint stays disabled unless `DEMO_CREDENTIALS` is set. These are fictional accounts only, not a public identity system.
+Demo accounts authenticate with a 30-minute bearer session. Each request reloads active role assignments from MongoDB; browser-supplied roles are ignored. Login and session access in `NODE_ENV=production` require `STAFF_LOGIN_ENABLED=true`, while the quick-fill credential endpoint stays disabled. These are fictional accounts only, not a public identity system.
 
 | Operation | Current server permission |
 | --- | --- |

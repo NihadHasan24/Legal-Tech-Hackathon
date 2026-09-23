@@ -59,14 +59,14 @@ function SignIn({ onLogin }) {
         <input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
         {error && <p role="alert" className="error">{error}</p>}
         <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        <fieldset className="demo-roles">
+        {!import.meta.env.PROD && <fieldset className="demo-roles">
           <legend>Quick fill a role</legend>
           <div className="demo-role-buttons">
             <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('DLAO_OFFICER', 'DLAO Officer')}>DLAO Officer</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('UDC_OPERATOR', 'UDC Operator')}>UDC Operator</button>
           </div>
           <p role="status" className="visually-hidden">{status}</p>
-        </fieldset>
+        </fieldset>}
       </form>
     </section>
   )
