@@ -280,6 +280,7 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
 
   // The public audio route accepts only known questions and real audio, and fails safe when the AI is off.
   assert.equal((await audio('/api/voice/answers?fields=problem,district')).status, 503)
+  assert.equal((await audio('/api/voice/answers?fields=confirm')).status, 503) // a read-back yes/no is a known question
   assert.equal((await audio('/api/voice/answers?fields=role')).status, 400)
   assert.equal((await audio('/api/voice/answers?fields=problem', { type: 'application/json' })).status, 400)
   assert.equal((await audio('/api/voice/answers?fields=problem', { bytes: 10 })).status, 400)
@@ -322,7 +323,7 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
   assert.equal((await upload({ 'x-lookup-code': 'f'.repeat(24) })).status, 403)
   assert.equal((await upload({ 'x-lookup-code': code }, 10)).status, 400)
   assert.equal((await upload({ 'x-lookup-code': code })).status, 201)
-  assert.equal((await upload({ 'x-lookup-code': code })).status, 409)
+  assert.equal((await upload({ 'x-lookup-code': code })).status, 201) // a retried identical upload is harmless
   const played = await fetch(`${baseUrl}/api/applications/${applicationId}/recording`, { headers: { authorization: `Bearer ${officer.token}` } })
   assert.equal(played.status, 200)
   assert.equal(played.headers.get('content-type'), 'audio/webm')

@@ -68,21 +68,23 @@ export async function transcribeAnswer(audio, mimeType) {
   return typeof result.text === 'string' ? result.text.trim() : ''
 }
 
-// Only the questions already asked are extractable, so the model can never fill a field out of turn.
+// Only the questions already asked are extractable, so the model can never fill a field out of turn. A choice carries
+// its question, because a short spoken answer ("হ্যাঁ", "জানি না") means nothing without it.
 const fieldSchemas = {
-  urgent: { type: ['boolean', 'null'] },
-  callerRole: { type: ['string', 'null'], enum: ['SELF', 'REPRESENTATIVE', null] },
+  urgent: { type: ['boolean', 'null'], description: 'Is anyone in immediate danger right now? true = yes, false = no.' },
+  callerRole: { type: ['string', 'null'], enum: ['SELF', 'REPRESENTATIVE', null], description: 'Calling for yourself (SELF, নিজের জন্য) or for someone else (REPRESENTATIVE, অন্য কারও পক্ষে)?' },
   callerName: { type: ['string', 'null'] },
   relationship: { type: ['string', 'null'] },
   applicantName: { type: ['string', 'null'] },
-  identityDocument: { type: ['string', 'null'], enum: ['AVAILABLE', 'UNAVAILABLE', 'UNKNOWN', null] },
+  identityDocument: { type: ['string', 'null'], enum: ['AVAILABLE', 'UNAVAILABLE', 'UNKNOWN', null], description: 'Does the applicant have an ID document at hand now? AVAILABLE = yes (আছে), UNAVAILABLE = no (নেই), UNKNOWN = the caller does not know (জানি না).' },
   problem: { type: ['string', 'null'] },
   district: { type: ['string', 'null'] },
-  contactChannel: { type: ['string', 'null'], enum: ['PHONE', 'IN_PERSON', null] },
+  contactChannel: { type: ['string', 'null'], enum: ['PHONE', 'IN_PERSON', null], description: 'Safest contact: a phone call to a safe number (PHONE, ফোন) or in person at the legal aid office (IN_PERSON, অফিস)?' },
   contactValue: { type: ['string', 'null'] },
-  contactOwner: { type: ['string', 'null'], enum: ['APPLICANT', 'CALLER', null] },
+  contactOwner: { type: ['string', 'null'], enum: ['APPLICANT', 'CALLER', null], description: 'Whose is the safe number? The applicant’s own (APPLICANT, আবেদনকারীর) or the caller’s, i.e. mine (CALLER, আমার)?' },
   safeTime: { type: ['string', 'null'] },
-  smsSafe: { type: ['boolean', 'null'] },
+  smsSafe: { type: ['boolean', 'null'], description: 'Is it safe to send an SMS to this number? true = yes, false = no.' },
+  confirm: { type: ['boolean', 'null'], description: 'Is what was just read back correct, and should it be kept or submitted? true = yes (হ্যাঁ, ঠিক আছে, জমা দিন), false = no or wrong.' },
 }
 export const extractableFields = Object.keys(fieldSchemas)
 

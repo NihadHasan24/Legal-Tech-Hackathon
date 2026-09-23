@@ -1,11 +1,12 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { api } from '../services/api.js'
-import { appendTranscript, applyExtraction, closeMicrophone, openMicrophone, startRecording } from '../utils/voiceAgent.js'
+import { appendTranscript, applyExtraction, closeMicrophone, openMicrophone, spokenDigits, spokenKey, startRecording } from '../utils/voiceAgent.js'
 import { activeFields, answer, correct, nextField, payload, startCall, steps } from '../utils/voiceScript.js'
 import { getLang, useLang } from '../components/Bi.jsx'
 
-// A phone-call screen for the 16699 simulation, run like an IVR line: a recorded Bangla clip asks each question,
-// the caller answers choices and numbers on the keypad, speaks other answers after the beep and presses # when done.
+// A phone-call screen for the 16699 simulation, run like an IVR line: a recorded Bangla clip asks each question and,
+// after the beep, the caller answers by voice (then pauses or presses #) or on the keypad. A spoken safe number is read
+// back digit by digit for the caller to confirm, so it is taken by voice only once those clips exist.
 // The whole call is recorded under the greeting's notice. The clips are recorded in Bangla only, so English mode shows
 // the questions as text and skips the clips (like light mode) until English recordings exist.
 const copies = { bn: {
@@ -19,7 +20,7 @@ const copies = { bn: {
   submitKey: 'জমা দিন',
   typeInstead: 'লিখে উত্তর দিন',
   readback: 'আপনার উত্তরগুলো শুনে বা পড়ে মিলিয়ে নিন',
-  listening: 'শুনছি… বলা শেষ হলে # চাপুন।',
+  listening: 'শুনছি… বলা শেষ হলে একটু থামুন বা # চাপুন।',
   transcribing: 'আপনার কথা থেকে উত্তরটি নেওয়া হচ্ছে…',
   submitting: 'আবেদন জমা হচ্ছে…',
   micDenied: 'মাইক্রোফোন চালু করা যায়নি। এই কল শুরু করতে মাইক্রোফোনের অনুমতি দিন।',
@@ -44,6 +45,9 @@ const copies = { bn: {
   fix: 'সংশোধন করুন',
   submitted: 'আবেদন জমা হয়েছে',
   erase: 'মুছুন',
+  heardNumber: 'আপনার বলা নম্বর',
+  correct: 'ঠিক আছে',
+  wrong: 'ভুল',
 }, en: {
   simulation: 'Web simulation · not a real phone call',
   call: 'Call',
@@ -55,7 +59,7 @@ const copies = { bn: {
   submitKey: 'Submit',
   typeInstead: 'Type your answer',
   readback: 'Check what you said',
-  listening: 'Listening… press # when you finish.',
+  listening: 'Listening… pause or press # when you finish.',
   transcribing: 'Understanding your answer…',
   submitting: 'Submitting the application…',
   micDenied: 'The microphone could not start. Allow microphone access to begin this call.',
@@ -80,6 +84,9 @@ const copies = { bn: {
   fix: 'Correct',
   submitted: 'Application submitted',
   erase: 'Erase',
+  heardNumber: 'The number you said',
+  correct: 'Correct',
+  wrong: 'Wrong',
 } }
 const bn = () => getLang() === 'bn'
 const text = () => copies[getLang()]
@@ -93,6 +100,10 @@ const DTMF = { 1: [697, 1209], 2: [697, 1336], 3: [697, 1477], 4: [770, 1209], 5
 const NO_INPUT_MS = 12000 // a choice or number question waits this long before the "no answer" clip
 const MIN_SPOKEN_MS = 700 // a # sooner than this after the beep counts as no answer
 const MAX_MISSES = 2 // after this many "no answer" clips in a row, wait quietly for a key
+const PAUSE_MS = 2500 // a spoken answer ends when the caller has been quiet this long, as if they pressed #
+const LONG_PAUSE_MS = 4000 // the problem is told in the caller's own words, with longer pauses to think
+const QUICK_PAUSE_MS = 1500 // a yes/no or a choice is one or two words
+const READ_BACK_CLIPS = [...[...'0123456789'].map((digit) => `digit${digit}`), 'numberConfirm']
 const bnDigits = (value) => (bn() ? value.replace(/[0-9]/g, (digit) => '০১২৩৪৫৬৭৮৯'[digit]) : value)
 const kindOf = (field) => (!field ? 'READBACK' : steps[field].choices ? 'CHOICE' : steps[field].tel ? 'DIGITS' : 'SPOKEN')
 const lightMode = () => { try { return localStorage.getItem('dlas-light-mode') === '1' } catch { return false } }
@@ -202,6 +213,7 @@ export default function VoiceAccess() {
   const [recordings, setRecordings] = useState({})
   const [submission, setSubmission] = useState({ status: 'IDLE' })
   const [starting, setStarting] = useState(false)
+  const [heardNumber, setHeardNumber] = useState({ turn: 'IDLE', value: null })
   const promptRef = useRef(null)
   const streamRef = useRef(null)
   const callRecorderRef = useRef(null)
@@ -216,10 +228,14 @@ export default function VoiceAccess() {
   const missesRef = useRef({ field: null, count: 0 })
   const transcriptRef = useRef([])
   const pendingRecordingRef = useRef(null)
+  const readBackReadyRef = useRef(false) // every clip needed to read a spoken number back exists
   const field = call ? nextField(call) : undefined
-  const kind = kindOf(field)
   const done = ['DONE', 'UPLOADING_RECORDING', 'RECORDING_FAILED'].includes(submission.status)
-  const turn = call ? `${call.mode}:${field ?? 'READBACK'}:${done}:${attempt}` : 'IDLE'
+  const question = call ? `${call.mode}:${field ?? 'READBACK'}:${done}:${attempt}` : 'IDLE'
+  // A spoken number waiting for the caller's yes/no belongs to the question it was heard on.
+  const spokenNumber = heardNumber.turn === question ? heardNumber.value : null
+  const kind = spokenNumber ? 'CONFIRM' : kindOf(field)
+  const turn = spokenNumber ? `${question}:CONFIRM` : question
   // Mode and typed digits belong to the question they were set for, so a new question starts clean. Without voice
   // understanding or a microphone, a spoken question opens straight into the typed answer.
   const typingDefault = kind === 'SPOKEN' && (voiceOff || !micOpen)
@@ -239,7 +255,8 @@ export default function VoiceAccess() {
     const intro = field && (call.mode === 'INTAKE' ? 'greeting' : 'urgentHandoff')
     const intros = intro && !introsRef.current.has(intro) && (call.mode === 'CALLBACK' || field === 'urgent') ? [intro] : []
     intros.forEach((clip) => introsRef.current.add(clip))
-    const clips = [...leadRef.current, ...intros, ...(done ? submission.status === 'DONE' ? ['submitted'] : [] : [field ?? 'readback'])]
+    const ask = kind === 'CONFIRM' ? [...[...spokenNumber].map((digit) => `digit${digit}`), 'numberConfirm'] : [field ?? 'readback']
+    const clips = [...leadRef.current, ...intros, ...(done ? submission.status === 'DONE' ? ['submitted'] : [] : ask)]
     leadRef.current = []
     const finished = lightMode() || !bn() || await playerRef.current.play(clips)
     if (finished && run === runRef.current && !done) listen()
@@ -274,22 +291,29 @@ export default function VoiceAccess() {
     toneRef.current?.close()
   }, [])
 
-  // After the clip: choices and numbers wait for keys; a spoken answer records after a beep until #.
+  // After the clip, every question records the caller's voice after a beep until a pause or #, while the keypad keeps
+  // working. The number is spoken only when its read-back will be heard. Without voice, a spoken question opens the
+  // typed answer and the rest wait for keys.
   function listen() {
-    if (kind !== 'SPOKEN') {
-      setMode('WAITING')
-      if (kind !== 'READBACK') armNoInput()
-      return
-    }
-    if (voiceOff || !streamRef.current) return setMode('TYPING')
+    const readBackHeard = readBackReadyRef.current && bn() && !lightMode()
+    if (voiceOff || !streamRef.current || (kind === 'DIGITS' && !readBackHeard)) return waitForKeys()
+    const words = kind === 'SPOKEN' || kind === 'DIGITS'
     try {
-      answerRef.current = { recorder: startRecording(streamRef.current), startedAt: Date.now() }
+      const pause = { context: toneRef.current, pauseMs: words ? steps[field].long ? LONG_PAUSE_MS : PAUSE_MS : QUICK_PAUSE_MS, onPause: () => { playTone(toneRef.current, [480], 150); finishSpoken() } }
+      answerRef.current = { recorder: startRecording(streamRef.current, pause), startedAt: Date.now() }
     } catch {
-      return setMode('TYPING')
+      return waitForKeys()
     }
     playTone(toneRef.current, [1000], 200)
     setMode('RECORDING')
-    timerRef.current = setTimeout(finishSpoken, steps[field].long ? 180000 : 20000)
+    if (words) timerRef.current = setTimeout(finishSpoken, steps[field].long ? 180000 : 20000)
+    else if (kind !== 'READBACK') armNoInput()
+  }
+
+  function waitForKeys() {
+    if (kind === 'SPOKEN') return setMode('TYPING')
+    setMode('WAITING')
+    if (kind !== 'READBACK') armNoInput()
   }
 
   function armNoInput() {
@@ -311,10 +335,10 @@ export default function VoiceAccess() {
     setAttempt((value) => value + 1)
   }
 
-  function choose(value) {
+  function choose(value, via) {
     cancelAnswer()
-    setRecordings((existing) => ({ ...existing, [field]: undefined })) // a keyed or typed answer has no voice clip
-    setCall(answer(call, field, value))
+    setRecordings((existing) => ({ ...existing, [field]: undefined })) // a keyed, typed, or read-back answer has no voice clip
+    setCall(answer(call, field, value, via))
   }
 
   function pressKey(key) {
@@ -324,23 +348,26 @@ export default function VoiceAccess() {
     if (key === '*') return repeat()
     if (mode === 'PROMPT') {
       playerRef.current.stop() // a key cuts the clip short, like type-ahead on a phone line
-      listen()
-      if (kind === 'SPOKEN') return // for a spoken answer the key only skips to the beep
+      if (kind === 'SPOKEN' || key === '#') return listen() // skips to the beep
+      setMode('WAITING')
     }
+    if (key === '#' && answerRef.current) return finishSpoken()
     if (kind === 'READBACK') return key === '1' && submit()
+    if (kind === 'CONFIRM') return key === '1' ? choose(spokenNumber, 'AI') : key === '2' ? repeat() : repeat('wrongKey')
     if (kind === 'CHOICE') {
       const option = steps[field].choices[Number(key) - 1]
       return option ? choose(option[0]) : repeat('wrongKey')
     }
     if (kind === 'DIGITS') {
       if (key === '#') return /^[0-9]{6,20}$/.test(digits) ? choose(digits) : repeat('noInput')
+      if (answerRef.current) { cancelAnswer(); setMode('WAITING') } // typing the number instead of saying it
       editDigits((value) => (value + key).slice(0, 20))
       return armNoInput()
     }
-    if (key === '#' && answerRef.current) finishSpoken()
   }
 
-  // # ends a spoken answer: transcribe it, keep what validates, and move on; otherwise ask again.
+  // A pause or # ends an answer given by voice: transcribe it, keep only what validates, and move on; otherwise ask
+  // again. A spoken number is read back first, and a yes/no to a read-back is its own small question.
   async function finishSpoken() {
     const current = answerRef.current
     if (!current) return
@@ -352,11 +379,23 @@ export default function VoiceAccess() {
     if (run !== runRef.current) return
     if (!heard) return repeat('noInput')
     setMode('PROCESSING')
+    const readBack = kind === 'CONFIRM' || kind === 'READBACK'
     try {
-      const result = await api(`/api/voice/answers?fields=${field}`, { method: 'POST', audio: clip })
+      const result = await api(`/api/voice/answers?fields=${readBack ? 'confirm' : field}`, { method: 'POST', audio: clip })
       if (run !== runRef.current) return
       if (result.text) transcriptRef.current = appendTranscript(transcriptRef.current, 'CALLER', result.text)
-      const { call: next, accepted } = applyExtraction(call, result.values)
+      const key = spokenKey(result.text) // "এক" or "দুই" said instead of pressed
+      if (readBack) {
+        const agreed = { 1: true, 2: false }[key] ?? result.values.confirm
+        if (agreed !== true) return repeat(agreed === false ? undefined : 'noInput')
+        return kind === 'READBACK' ? submit('VOICE') : choose(spokenNumber, 'AI')
+      }
+      if (kind === 'DIGITS') {
+        const number = spokenDigits(result.values[field])
+        return number ? setHeardNumber({ turn: question, value: number }) : repeat('noInput')
+      }
+      const option = kind === 'CHOICE' && steps[field].choices[key - 1]
+      const { call: next, accepted } = applyExtraction(call, option ? { [field]: option[0] } : result.values)
       if (accepted.length) {
         const clipUrl = URL.createObjectURL(clip)
         setRecordings((existing) => ({ ...existing, ...Object.fromEntries(accepted.map((item) => [item, clipUrl])) }))
@@ -368,7 +407,7 @@ export default function VoiceAccess() {
       if (failure.status !== 503) return repeat('noInput')
       setVoiceOff(true)
       setNotice(copy.voiceOff)
-      setMode('TYPING')
+      setMode(kind === 'SPOKEN' ? 'TYPING' : 'WAITING')
     }
   }
 
@@ -397,6 +436,14 @@ export default function VoiceAccess() {
       setRecordings({})
       setSubmission({ status: 'IDLE' })
       setAttempt(0)
+      // Per-question state from an earlier call must not leak into the same question of this one.
+      setModeState({ turn: 'IDLE', mode: 'PROMPT' })
+      setDigitState({ turn: 'IDLE', value: '' })
+      setHeardNumber({ turn: 'IDLE', value: null })
+      readBackReadyRef.current = false
+      Promise.all(READ_BACK_CLIPS.map((clip) => fetch(`/audio/${clip}.mp3`, { method: 'HEAD' })
+        .then((response) => response.ok && /^audio\//.test(response.headers.get('content-type') ?? ''), () => false)))
+        .then((found) => { readBackReadyRef.current = found.every(Boolean) })
       streamRef.current = stream
       callRecorderRef.current = startRecording(stream)
       setMicOpen(true)
@@ -436,11 +483,11 @@ export default function VoiceAccess() {
     setCall(null)
   }
 
-  async function submit() {
+  async function submit(confirmation = 'BUTTON') {
     setSubmission({ status: 'PROCESSING' })
     let result
     try {
-      result = await api('/api/voice/intakes', { method: 'POST', body: payload(call, { transcript: transcriptRef.current }) })
+      result = await api('/api/voice/intakes', { method: 'POST', body: payload(call, { confirmation, transcript: transcriptRef.current }) })
     } catch {
       return setSubmission({ status: 'FAILED' })
     }
@@ -466,6 +513,7 @@ export default function VoiceAccess() {
   if (kind === 'CHOICE') steps[field].choices.forEach((choice, index) => { hints[index + 1] = choiceText(choice) })
   if (kind === 'DIGITS' || mode === 'RECORDING') hints['#'] = copy.finishKey
   if (kind === 'READBACK') hints[1] = copy.submitKey
+  if (kind === 'CONFIRM') Object.assign(hints, { 1: copy.correct, 2: copy.wrong })
   return (
     <section className="call-page" aria-labelledby="voice-title" lang={getLang()}>
       <header className="call-head">
@@ -481,7 +529,8 @@ export default function VoiceAccess() {
             <CallTimer />
           </div>}
           <div role="status" className="call-notice">
-            {mode === 'RECORDING' && <p>{copy.listening}</p>}
+            {/* Not announced: a screen reader speaking now would be recorded as the answer; the beep is the cue. */}
+            {mode === 'RECORDING' && <p aria-hidden="true">{copy.listening}</p>}
             {mode === 'PROCESSING' && <p>{copy.transcribing}</p>}
             {submission.status === 'PROCESSING' && <p>{copy.submitting}</p>}
             {notice && <p>{notice}</p>}
@@ -500,7 +549,7 @@ export default function VoiceAccess() {
               {submission.status === 'DONE' && <button type="button" className="secondary-button" onClick={() => setCall(null)}>{copy.newCall}</button>}
             </div>
             : <div className="call-turn">
-              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{field ? promptOf(field) : copy.readback}</h2>
+              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{kind === 'CONFIRM' ? <>{copy.heardNumber}: <span translate="no">{bnDigits(spokenNumber)}</span></> : field ? promptOf(field) : copy.readback}</h2>
               {kind === 'DIGITS' && <div className="call-digits">
                 <output aria-label={labelOf(field)}>{bnDigits(digits)}</output>
                 {digits && <button type="button" className="text-button" onClick={() => editDigits((value) => value.slice(0, -1))}>{copy.erase}</button>}

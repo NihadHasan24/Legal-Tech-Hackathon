@@ -18,10 +18,11 @@ test('a spoken answer is transcribed and fills approved fields', async ({ page }
   await expect(page.getByRole('heading', { name: steps.callerRole.prompt })).toBeFocused()
   await page.keyboard.press('2') // calling for someone else, so the next question is spoken
   await expect(page.getByRole('heading', { name: steps.callerName.prompt })).toBeFocused()
+  const answered = page.waitForResponse('**/api/voice/answers**')
   await page.keyboard.press('#') // skip the clip; the beep starts the recording
   await page.waitForTimeout(6000) // let the recording play into the fake microphone
-  const answered = page.waitForResponse('**/api/voice/answers**')
-  await page.keyboard.press('#')
+  // A pause in the sample may already have ended the answer; otherwise # does.
+  if (await page.getByText(/শুনছি/).isVisible()) await page.keyboard.press('#')
   const response = await answered
   expect(response.status()).toBe(200)
   const result = await response.json()

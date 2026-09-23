@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { appendTranscript, applyExtraction, parseAnswer } from './voiceAgent.js'
+import { appendTranscript, applyExtraction, parseAnswer, pauseDetector, spokenDigits, spokenKey } from './voiceAgent.js'
 import { answer, correct, nextField, payload, startCall } from './voiceScript.js'
 
 
@@ -59,5 +59,36 @@ test('the payload carries no consent choices or empty transcript, and answers ar
   expect(parseAnswer('problem', 'ok')).toBeUndefined() // shorter than the minimum
   expect(parseAnswer('contactValue', 'not a number')).toBeUndefined()
   expect(parseAnswer('urgent', 'YES')).toBe(true)
-  expect(appendTranscript([{ speaker: 'CALLER', text: 'আমি ' }], 'CALLER', 'রিপন')).toEqual([{ speaker: 'CALLER', text: 'আমি রিপন' }])
+  expect(appendTranscript([{ speaker: 'CALLER', text: 'না' }], 'CALLER', 'রিপন')).toEqual([{ speaker: 'CALLER', text: 'না' }, { speaker: 'CALLER', text: 'রিপন' }])
+})
+
+// Feeds loudness readings every 100 ms, as the page samples the microphone; returns when the answer ends, or null.
+function endsAt(segments, pauseMs = 2500) {
+  const paused = pauseDetector(pauseMs)
+  let now = 0
+  for (const [level, ms] of segments) for (let end = now + ms; now < end; now += 100) if (paused(level, now)) return now
+  return null
+}
+
+test('a spoken answer ends after the caller speaks and then pauses, not while they think or cough', () => {
+  const quiet = 0.002
+  // Beep echo, thinking, "আমার নাম … রহিমা খাতুন" with a short gap between words, then quiet: ends 2.5 s after speech.
+  expect(endsAt([[0.2, 300], [quiet, 1500], [0.08, 600], [quiet, 500], [0.08, 600], [quiet, 5000]])).toBe(6000)
+  expect(endsAt([[quiet, 10000]])).toBeNull() // never spoke: # or the time limit ends it
+  expect(endsAt([[quiet, 1000], [0.1, 200], [quiet, 6000]])).toBeNull() // a cough is not an answer
+  // Steady room hum louder than the minimum level is the floor, not speech.
+  expect(endsAt([[0.03, 2000], [0.3, 1000], [0.03, 4000]])).toBe(5500)
+  // The problem question allows longer pauses to think: a 3 s gap does not end it, 4 s of quiet does.
+  expect(endsAt([[quiet, 1000], [0.08, 1000], [quiet, 3000], [0.08, 1000], [quiet, 6000]], 4000)).toBe(10000)
+})
+
+test('a key number or phone number said aloud is matched like one pressed on the keypad', () => {
+  expect(spokenKey('দুই।')).toBe(2)
+  expect(spokenKey(' ৩ ')).toBe(3)
+  expect(spokenKey('এক')).toBe(1)
+  expect(spokenKey('একজন')).toBeUndefined() // a word that only starts like a number is not a key
+  expect(spokenKey('নিজের জন্য')).toBeUndefined() // words go to the model instead
+  expect(spokenDigits('০১৭০০ ১২৩-৪৫৬')).toBe('01700123456')
+  expect(spokenDigits('12345')).toBeUndefined() // too short to be a phone number
+  expect(spokenDigits(null)).toBeUndefined()
 })

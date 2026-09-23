@@ -260,7 +260,8 @@ const audioTypes = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio
 export function validateAnswerAudio(request, _response, next) {
   if (Object.keys(request.query).some((key) => key !== 'fields')) fail('Unexpected parameter.')
   const fields = String(request.query.fields || '').split(',')
-  if (!fields.length || fields.some((field) => !voiceAnswers[field]) || new Set(fields).size !== fields.length) fail('Unknown question.')
+  // `confirm` is the caller's yes/no to a read-back: their spoken number, or the whole application before submitting.
+  if (!fields.length || fields.some((field) => !voiceAnswers[field] && field !== 'confirm') || new Set(fields).size !== fields.length) fail('Unknown question.')
   if (!audioTypes.includes((request.get('content-type') || '').split(';')[0].trim())) fail('Unsupported audio type.')
   if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
   next()
