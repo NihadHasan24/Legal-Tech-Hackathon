@@ -1,9 +1,40 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../services/api.js'
+import DocumentReview from './DocumentReview.jsx'
+import ReferralPanel from './ReferralPanel.jsx'
+import LawyerManagement from './LawyerManagement.jsx'
+import DuplicateReview from './DuplicateReview.jsx'
+import RelatedIncidentPanel from './RelatedIncidentPanel.jsx'
+import TriagePanel from './TriagePanel.jsx'
+import MediationPanel from './MediationPanel.jsx'
 
 const showDate = (value) => value ? new Date(value).toLocaleString() : 'Not set'
 const channels = { VOICE_SIM: '16699 voice simulation', HELPLINE_SIM: 'Helpline agent (simulated 16699)', UDC: 'UDC assisted', DLAO: 'DLAO office', WEB: 'Web' }
+
+// Officer-only playback of the full 16699 call. Fetched with the session token, which a bare <audio src> cannot send.
+function CallRecording({ applicationId, token }) {
+  const [url, setUrl] = useState(null)
+  const [state, setState] = useState('LOADING')
+  useEffect(() => {
+    const controller = new AbortController()
+    let objectUrl
+    fetch(`/api/applications/${applicationId}/recording`, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal })
+      .then((response) => (response.ok ? response.blob() : Promise.reject(response.status)))
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); setState('READY') })
+      .catch((failure) => { if (failure?.name !== 'AbortError') setState(failure === 404 ? 'NONE' : 'FAILED') })
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [applicationId, token])
+  return (
+    <section className="card" aria-labelledby="recording-title">
+      <h2 id="recording-title">Call recording</h2>
+      {state === 'READY'
+        ? <audio controls preload="metadata" src={url} aria-label="Full call recording" />
+        : <p className="muted">{{ LOADING: 'Loading the recording…', NONE: 'No call recording is stored for this application.', FAILED: 'The recording could not be loaded. Refresh to try again.' }[state]}</p>}
+      <p className="muted">The greeting tells every caller the call is recorded; no opt-out is offered (project decision 2026-09-23, pending law-team review). Confirmed facts are listed separately.</p>
+    </section>
+  )
+}
 
 export default function RecordPage({ session }) {
   const { applicationId } = useParams()
@@ -15,6 +46,8 @@ export default function RecordPage({ session }) {
   const [loading, setLoading] = useState(true)
   const [reviewState, setReviewState] = useState('READY_FOR_DECISION')
   const [reviewReason, setReviewReason] = useState('')
+  const [priorityDecision, setPriorityDecision] = useState('URGENT')
+  const [priorityReason, setPriorityReason] = useState('')
   const [acceptReason, setAcceptReason] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskAction, setTaskAction] = useState('')
@@ -22,6 +55,7 @@ export default function RecordPage({ session }) {
   const [docLabel, setDocLabel] = useState('')
   const [docQuality, setDocQuality] = useState('PENDING_REVIEW')
   const [docNote, setDocNote] = useState('')
+  const [docRestricted, setDocRestricted] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState(null)
   const [versions, setVersions] = useState([])
   const [contactChannel, setContactChannel] = useState('PHONE')
@@ -41,8 +75,11 @@ export default function RecordPage({ session }) {
       officer ? api(`/api/applications/${applicationId}/audit`, options) : Promise.resolve(null),
       officer ? api(`/api/applications/${applicationId}/safe-contact`, options) : Promise.resolve(null),
       officer ? api(`/api/applications/${applicationId}/transcript`, options) : Promise.resolve(null),
-    ]).then(([record, tasks, documents, contacts, facts, audit, safeContact, transcript]) => {
-      setData({ record, tasks, documents, contacts, facts, audit, safeContact, transcript })
+      api(`/api/applications/${applicationId}/history`, options),
+      officer ? api(`/api/applications/${applicationId}/referrals`, options) : Promise.resolve(null),
+      officer ? api(`/api/applications/${applicationId}/evidence-access`, options) : Promise.resolve([]),
+    ]).then(([record, tasks, documents, contacts, facts, audit, safeContact, transcript, history, referrals, evidenceAccess]) => {
+      setData({ record, tasks, documents, contacts, facts, audit, safeContact, transcript, history, referrals, evidenceAccess })
       setLoading(false)
     }).catch((failure) => { if (failure.name !== 'AbortError') { setError(failure.message); setLoading(false) } })
     return () => controller.abort()
@@ -72,6 +109,12 @@ export default function RecordPage({ session }) {
     if (result) setAcceptReason('')
   }
 
+  async function submitPriority(event) {
+    event.preventDefault()
+    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, 'Human priority override recorded in the audit timeline.')
+    if (result) setPriorityReason('')
+  }
+
   async function submitTask(event) {
     event.preventDefault()
     const result = await change(`/api/applications/${applicationId}/tasks`, { title: taskTitle, ownerRole: taskRole, nextAction: taskAction }, 'Task added to this record.')
@@ -81,10 +124,11 @@ export default function RecordPage({ session }) {
   async function submitDocument(event) {
     event.preventDefault()
     const path = selectedDocument ? `/api/documents/${selectedDocument.id}/versions` : `/api/applications/${applicationId}/documents`
-    const result = await change(path, { label: docLabel, qualityState: docQuality, ...(docNote ? { note: docNote } : {}) }, selectedDocument ? 'Document version added.' : 'Document metadata added.')
+    const result = await change(path, { label: docLabel, qualityState: docQuality, ...(docNote ? { note: docNote } : {}), ...(!selectedDocument && docRestricted ? { sensitivity: 'RESTRICTED' } : {}) }, selectedDocument ? 'Document version added.' : docRestricted ? 'Restricted evidence recorded. Only you hold an access grant.' : 'Document metadata added.')
     if (result) {
       setDocLabel('')
       setDocNote('')
+      setDocRestricted(false)
       if (selectedDocument) setVersions(await api(`/api/documents/${selectedDocument.id}/versions`, { token: session.token }))
     }
   }
@@ -127,6 +171,7 @@ export default function RecordPage({ session }) {
               <div><dt>Reported by</dt><dd>{data.record.representation ? `${data.record.representation.representativeName} · ${data.record.representation.relationship} · authority ${data.record.representation.authorityStatus}` : 'No representative recorded'}</dd></div>
               <div><dt>Status</dt><dd><span className="badge">{data.record.status}</span></dd></div>
               <div><dt>Review</dt><dd>{data.record.reviewState?.replaceAll('_', ' ')}</dd></div>
+              <div><dt>Human priority</dt><dd>{data.record.priorityDecision || 'Not recorded'}</dd></div>
               <div><dt>Identity</dt><dd>{data.record.identityStatus} · legal requirements pending verification</dd></div>
               <div><dt>Case ID</dt><dd>{data.record.caseId || 'Not created before acceptance'}</dd></div>
               <div><dt>Next action</dt><dd>{data.record.nextTask?.nextAction || 'No open task'}</dd></div>
@@ -147,6 +192,21 @@ export default function RecordPage({ session }) {
             {neutralScript && <figure className="script-box" aria-label="Neutral script"><figcaption>Say only this (placeholder pending law-team approval):</figcaption><blockquote>{neutralScript}</blockquote></figure>}
           </section>}
         </div>
+
+        {data.record.assistance && <section className="card" aria-labelledby="assistance-title"><h2 id="assistance-title">Assisted-intake provenance</h2><dl className="details">
+          <div><dt>Helper</dt><dd>{data.record.assistance.helperName}</dd></div>
+          <div><dt>Translator</dt><dd>{data.record.assistance.translatorName}</dd></div>
+          <div><dt>Typist</dt><dd>{data.record.assistance.typistName}</dd></div>
+          <div><dt>Original language</dt><dd>{data.record.assistance.originalLanguage}</dd></div>
+          <div><dt>Case type</dt><dd>{data.record.assistance.caseType}</dd></div>
+          <div><dt>Assisted consent</dt><dd>{data.record.assistance.consentState} (oral attestation; legal review pending)</dd></div>
+          <div><dt>Original statement confirmed</dt><dd>{data.record.assistance.originalConfirmed ? 'yes' : 'pending'}</dd></div>
+          <div><dt>Translation confirmed</dt><dd>{data.record.assistance.translationConfirmed ? 'yes' : 'pending'}</dd></div>
+        </dl><p className="muted">The original account and translated text remain distinct facts. The helper phone is not treated as applicant contact.</p></section>}
+
+        {officer && <section className="card" aria-labelledby="priority-title"><h2 id="priority-title">Human priority override</h2><p className="muted">Queue urgency is a rules-based recommendation (criteria pending legal verification). An officer decides whether to prioritize; this does not decide legal eligibility.</p>{data.record.urgencyReasons.length ? <><h3>Urgency recommendation reasons</h3><ul>{data.record.urgencyReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></> : <p>No urgency indicators are recorded.</p>}<form onSubmit={submitPriority} className="form-stack inline-form"><label htmlFor="priority-decision">Priority decision</label><select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}><option value="URGENT">Prioritize urgently</option><option value="ROUTINE">Handle routinely</option></select><label htmlFor="priority-reason">Override reason</label><textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required /><button type="submit">Record priority override</button></form></section>}
+
+        {!officer && <section className="card" aria-labelledby="history-title"><h2 id="history-title">Case reconstruction</h2><p className="muted">Action history without private reasons or fact text. Contact and task history on this page belong to the same record.</p><p>Audit integrity: {data.history.valid ? 'valid under demo assumptions' : 'check required'}</p><ol className="timeline">{data.history.events.map((event, index) => <li key={index}><strong>{event.action.replaceAll('_', ' ')}</strong><small> {event.actorRole.replaceAll('_', ' ')} · <time dateTime={event.createdAt}>{showDate(event.createdAt)}</time></small></li>)}</ol></section>}
 
         {officer && data.record.status === 'SUBMITTED' && <section className="card" aria-labelledby="decision-title">
           <h2 id="decision-title">Human review and acceptance</h2>
@@ -185,12 +245,18 @@ export default function RecordPage({ session }) {
           </form>
         </section>
 
+        {officer && data.record.status === 'ACCEPTED' && <LawyerManagement applicationId={applicationId} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
+        {officer && data.record.status === 'ACCEPTED' && <TriagePanel applicationId={applicationId} token={session.token} />}
+        {officer && data.record.status === 'ACCEPTED' && <RelatedIncidentPanel applicationId={applicationId} token={session.token} />}
+        {officer && <DuplicateReview applicationId={applicationId} token={session.token} />}
+        {officer && data.record.caseId && <MediationPanel applicationId={applicationId} session={session} role="DLAO_OFFICER" />}
+
         <div className="summary-grid">
           <section className="card" aria-labelledby="docs-title">
             <h2 id="docs-title">Document metadata</h2>
-            <p className="muted">No document files are uploaded at this step. Unreadable content is never guessed.</p>
+            <p className="muted">Metadata is versioned. Fictional text uploads and cited review appear below for assisted applications; unreadable content is never guessed.</p>
             {data.documents.length === 0 && <p>No metadata recorded.</p>}
-            <ul className="plain-list">{data.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong><p>Version {document.currentVersion}</p></div><button type="button" className="secondary-button" onClick={() => selectDocument(document)}>Versions</button></li>)}</ul>
+            <ul className="plain-list">{data.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong>{document.sensitivity === 'RESTRICTED' && <> <span className="badge warn-badge">Restricted</span></>}<p>{document.redacted ? 'You hold no access grant; opening is refused and logged.' : `Version ${document.currentVersion}`}</p></div>{!document.redacted && <button type="button" className="secondary-button" onClick={() => selectDocument(document)} aria-label={`Versions of ${document.label}`}>Versions</button>}</li>)}</ul>
             {selectedDocument && <div className="version-history"><h3>Versions of {selectedDocument.label}</h3><ol>{versions.map((version) => <li key={version.version}>Version {version.version}: {version.label} — {version.qualityState.replaceAll('_', ' ')}{version.note ? ` · ${version.note}` : ''}</li>)}</ol></div>}
             {officer && <form onSubmit={submitDocument} className="form-stack">
               <h3>{selectedDocument ? 'Add a metadata version' : 'Add document metadata'}</h3>
@@ -198,8 +264,10 @@ export default function RecordPage({ session }) {
               <label htmlFor="doc-label">Label</label><input id="doc-label" value={docLabel} onChange={(event) => setDocLabel(event.target.value)} minLength="3" maxLength="160" required />
               <label htmlFor="doc-quality">Quality state</label><select id="doc-quality" value={docQuality} onChange={(event) => setDocQuality(event.target.value)}><option value="PENDING_REVIEW">Pending review</option><option value="READABLE">Readable metadata</option><option value="UNREADABLE">Unreadable / human verification required</option></select>
               <label htmlFor="doc-note">Note (optional)</label><textarea id="doc-note" value={docNote} onChange={(event) => setDocNote(event.target.value)} maxLength="500" />
+              {!selectedDocument && <label className="checkbox-label" htmlFor="doc-restricted"><input id="doc-restricted" type="checkbox" checked={docRestricted} onChange={(event) => setDocRestricted(event.target.checked)} />Highly sensitive evidence: restrict to me and explicit authorisations</label>}
               <button type="submit" className="secondary-button">{selectedDocument ? 'Add version' : 'Add metadata'}</button>
             </form>}
+            {officer && data.evidenceAccess.length > 0 && <div className="version-history"><h3>Restricted evidence access log</h3><ol>{data.evidenceAccess.map((entry) => <li key={entry.id}>{entry.outcome} · {entry.user} ({entry.roles.join(', ').replaceAll('_', ' ')}) · {entry.document} · basis {entry.basis.replaceAll('_', ' ').toLowerCase()} · <time dateTime={entry.createdAt}>{showDate(entry.createdAt)}</time></li>)}</ol></div>}
           </section>
           <section className="card" aria-labelledby="contact-title">
             <h2 id="contact-title">Contact history</h2>
@@ -216,9 +284,15 @@ export default function RecordPage({ session }) {
           </section>
         </div>
 
+        {officer && <ReferralPanel applicationId={applicationId} officeCode={data.record.officeCode} accepted={data.record.status === 'ACCEPTED'} referrals={data.referrals} documents={data.documents} token={session.token} change={change} />}
+
+        {officer && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={data.record.assistance.caseType} documents={data.documents} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
+
+        {officer && data.record.channel === 'VOICE_SIM' && <CallRecording applicationId={applicationId} token={session.token} />}
+
         {officer && data.transcript && <section className="card" aria-labelledby="transcript-title">
           <h2 id="transcript-title">Voice transcript</h2>
-          <p className="muted">Kept because the caller consented. Machine transcription by {data.transcript.transcribedBy}, not a verbatim legal record; confirmed facts are listed separately.</p>
+          <p className="muted">Kept with the call recording. Machine transcription by {data.transcript.transcribedBy}, not a verbatim legal record; confirmed facts are listed separately.</p>
           <ol className="timeline">{data.transcript.turns.map((line, index) => <li key={index}><strong>{line.speaker === 'CALLER' ? 'Caller' : 'AI assistant'}</strong><p lang="bn">{line.text}</p></li>)}</ol>
         </section>}
 

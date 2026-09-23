@@ -1,9 +1,10 @@
 import mongoose from 'mongoose'
-import { Application, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, LawyerAssignment, Person, Representation, RoleAssignment, SafeContactProfile, Task, User, VoiceTranscript } from '../models/index.js'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { Application, AssistanceRecord, AuditEvent, CallRecording, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerPaymentEvent, LawyerUpdate, Mediation, Person, Referral, Representation, RoleAssignment, SafeContactProfile, Task, User, VoiceTranscript } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
 import { nextRecordId } from '../utils/recordId.js'
-import { liveVoiceModel } from './ai/liveVoice.js'
+import { extractionModel, speechModel } from './ai/groq.js'
 import { appendAudit, getAuditTrail } from './auditService.js'
 
 const intakeChannels = {
@@ -12,6 +13,17 @@ const intakeChannels = {
   DLAO_OFFICER: 'DLAO',
   CASE_SUPPORT: 'DLAO',
 }
+const newLookupCode = () => randomBytes(12).toString('hex')
+const lookupHash = (code) => createHash('sha256').update(code).digest('hex')
+
+// Demo rules only (urgency criteria await law-team approval); the officer's priorityDecision stays the final priority.
+export function urgencyReasons({ urgentFact, aiSensitive, restrictedEvidence }) {
+  return [
+    urgentFact && `An urgent fact is recorded (safety.urgent revision ${urgentFact.revision}, ${urgentFact.sourceType.replaceAll('_', ' ').toLowerCase()}).`,
+    aiSensitive && 'AI flagged possible violence or danger in the intake words.',
+    restrictedEvidence && `${restrictedEvidence} restricted sensitive-evidence item${restrictedEvidence === 1 ? ' is' : 's are'} on file.`,
+  ].filter(Boolean)
+}
 
 function intakeAssignment(actor) {
   const assignment = actor.assignments.find(({ role }) => intakeChannels[role])
@@ -19,14 +31,14 @@ function intakeAssignment(actor) {
   return assignment
 }
 
-async function officeApplication(applicationId, actor, session) {
+export async function officeApplication(applicationId, actor, session) {
   const application = await Application.findOne({ applicationId }).session(session)
   if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
   if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot change the application.')
   return application
 }
 
-async function advance(application, session, changes = {}) {
+export async function advance(application, session, changes = {}) {
   const updated = await Application.findOneAndUpdate(
     { applicationId: application.applicationId, version: application.version },
     { $set: changes, $inc: { version: 1, auditSequence: 1 } },
@@ -39,11 +51,13 @@ async function advance(application, session, changes = {}) {
 export async function submitApplication({ applicantName, demoSeedKey }, actor) {
   const assignment = intakeAssignment(actor)
   const applicationId = await nextRecordId('APP')
+  const lookupCode = newLookupCode()
   return mongoose.connection.transaction(async (session) => {
     const [person] = await Person.create([{ displayName: applicantName, identityStatus: 'INCOMPLETE' }], { session })
     const [application] = await Application.create([{
       applicationId,
       demoSeedKey,
+      lookupCodeHash: lookupHash(lookupCode),
       applicantPersonId: person._id,
       officeCode: assignment.officeCode,
       channel: intakeChannels[assignment.role],
@@ -65,7 +79,7 @@ export async function submitApplication({ applicantName, demoSeedKey }, actor) {
       channel: application.channel,
       newState: { status: 'SUBMITTED', applicantPersonId: person.id },
     }, session)
-    return { applicationId, status: application.status, caseId: null, identityStatus: person.identityStatus }
+    return { applicationId, status: application.status, caseId: null, identityStatus: person.identityStatus, lookupCode }
   })
 }
 
@@ -81,9 +95,10 @@ const voiceChannelUser = () => User.findOneAndUpdate(
   { upsert: true, returnDocument: 'after' },
 )
 
-export async function submitVoiceIntake({ mode, callbackReason, consents, answers, correctedFields = [], aiFields = [], confirmation = 'BUTTON', transcript }) {
+export async function submitVoiceIntake({ mode, callbackReason, answers, correctedFields = [], aiFields = [], confirmation = 'BUTTON', transcript, aiSensitive = false }) {
   const channelUser = await voiceChannelUser()
   const applicationId = await nextRecordId('APP')
+  const lookupCode = newLookupCode()
   return mongoose.connection.transaction(async (session) => {
     const callback = mode === 'CALLBACK'
     const representative = answers.callerRole === 'REPRESENTATIVE'
@@ -97,10 +112,6 @@ export async function submitVoiceIntake({ mode, callbackReason, consents, answer
       applicationId, applicantPersonId: applicant._id, representativePersonId: caller._id, relationship: answers.relationship,
       scope: 'Initial report through the 16699 voice simulation; authority not verified.', recordedByUserId,
     }], { session }) : []
-    const consentRecords = await ConsentRecord.create(Object.entries(consents).map(([scope, state]) => ({
-      applicationId, personId: caller._id, scope, state, revision: 1, sourceType, recordedByUserId,
-      attestation: `Caller chose ${state} in the 16699 voice simulation. Placeholder wording pending law-team approval.`,
-    })), { session, ordered: true })
     // [fact field, answer it came from, value]; an answer the live model extracted is flagged aiInferred.
     const factValues = callback
       ? [['location.district', 'district', answers.district], ['safety.urgent', 'urgent', answers.urgent ? 'YES' : 'NO'], ['intake.callback_reason', null, callbackReason]]
@@ -109,7 +120,7 @@ export async function submitVoiceIntake({ mode, callbackReason, consents, answer
     const applicantConfirmed = !callback && !representative
     const facts = await CaseFact.create(factValues.map(([field, answerField, value]) => ({
       applicationId, field, value, sourceType, sourcePersonId: callback ? undefined : caller._id,
-      captureMethod: callbackReason === 'LIVE_VOICE_REFUSED' ? 'TYPED' : 'VOICE', aiInferred: aiFields.includes(answerField),
+      captureMethod: 'VOICE', aiInferred: aiFields.includes(answerField),
       callerConfirmed: true, applicantConfirmed, confirmedByPersonId: applicantConfirmed ? applicant._id : undefined,
       revision: 1, recordedByUserId,
     })), { session, ordered: true })
@@ -126,34 +137,63 @@ export async function submitVoiceIntake({ mode, callbackReason, consents, answer
       title: callback ? `${answers.urgent ? 'Urgent human' : 'Human'} callback requested` : 'Review 16699 voice intake',
       nextAction: callback
         ? 'Call back only on the recorded safe number at the safe time. Use neutral wording; disclose nothing if someone else answers.'
-        : `${representative ? 'Reported by a representative: authority and applicant confirmation are pending.' : 'Reported by the applicant by voice.'} Identity is incomplete. Contact only through the active safe-contact profile with neutral wording.`,
+        : `${representative ? 'Reported by a representative: authority and applicant confirmation are pending.' : 'Reported by the applicant by voice.'} Identity is incomplete. Contact only through the active safe-contact profile with neutral wording.${aiSensitive ? ' AI flagged possible violence or danger in the caller’s words; a human must judge it.' : ''}`,
     }], { session })
     const aiAssisted = aiFields.length > 0 || Boolean(transcript)
-    const transcriptConsent = consentRecords.find((consent) => consent.scope === 'TRANSCRIPT_STORAGE')
-    const [storedTranscript] = transcript ? await VoiceTranscript.create([{ applicationId, turns: transcript, transcribedBy: liveVoiceModel() ?? 'unknown', consentId: transcriptConsent._id }], { session }) : []
+    const [storedTranscript] = transcript ? await VoiceTranscript.create([{ applicationId, turns: transcript, transcribedBy: speechModel() }], { session }) : []
     const events = [
       {
         action: 'APPLICATION_SUBMITTED',
         // Records that AI assisted and which answers it extracted; no model reasoning is stored.
-        newState: { status: 'SUBMITTED', applicantPersonId: applicant.id, mode, callerRole: answers.callerRole ?? 'NOT_COLLECTED', callbackReason: callbackReason ?? null, correctedFields, aiAssisted, liveModel: aiAssisted ? liveVoiceModel() : null, aiFields, confirmation },
+        newState: { status: 'SUBMITTED', applicantPersonId: applicant.id, mode, callerRole: answers.callerRole ?? 'NOT_COLLECTED', callbackReason: callbackReason ?? null, correctedFields, aiAssisted, aiSensitive, aiModels: aiAssisted ? { speechToText: speechModel(), extraction: extractionModel() } : null, aiFields, confirmation },
         reason: 'Caller confirmed the read-back and submitted through the 16699 voice simulation.',
       },
       ...(representation ? [{ action: 'REPRESENTATION_RECORDED', newState: { representationId: representation.id, authorityStatus: 'PENDING' } }] : []),
-      ...consentRecords.map((consent) => ({ action: 'CONSENT_RECORDED', newState: { consentId: consent.id, scope: consent.scope, state: consent.state, revision: 1 } })),
+      // Project decision 2026-09-23: every call is recorded; the greeting tells the caller, and no opt-out is offered.
+      { action: 'RECORDING_NOTICE_GIVEN', newState: { notice: 'GREETING_ANNOUNCES_CALL_RECORDING', optOutOffered: false } },
       ...facts.map((fact) => ({ action: 'FACT_RECORDED', newState: { factId: fact.id, field: fact.field, sourceType, callerConfirmed: true, applicantConfirmed } })),
       { action: 'SAFE_CONTACT_UPDATED', newState: { profileId: profile.id, version: 1 } },
       { action: 'TASK_CREATED', newState: { taskId: task.id, kind: task.kind, ownerRole: task.ownerRole } },
-      ...(storedTranscript ? [{ action: 'TRANSCRIPT_STORED', newState: { transcriptId: storedTranscript.id, turns: transcript.length, consentId: transcriptConsent.id } }] : []),
+      ...(storedTranscript ? [{ action: 'TRANSCRIPT_STORED', newState: { transcriptId: storedTranscript.id, turns: transcript.length } }] : []),
     ]
     await Application.create([{
       applicationId, applicantPersonId: applicant._id, officeCode: VOICE_OFFICE, channel: 'VOICE_SIM',
-      submittedByUserId: channelUser._id, auditSequence: events.length,
+      submittedByUserId: channelUser._id, auditSequence: events.length, lookupCodeHash: lookupHash(lookupCode),
     }], { session })
     for (const [index, event] of events.entries()) {
       await appendAudit({ ...event, applicationId, sequence: index + 1, actorUserId: channelUser._id, actorRole: 'SYSTEM', channel: 'VOICE_16699_SIM' }, session)
     }
-    return { applicationId, mode, status: 'SUBMITTED' }
+    return { applicationId, mode, status: 'SUBMITTED', lookupCode }
   })
+}
+
+const RECORDING_UPLOAD_WINDOW_MS = 15 * 60 * 1000
+
+// The caller's browser uploads the full call once, right after submission, proving it with the one-time status code.
+export async function storeCallRecording(applicationId, code, audio, mimeType) {
+  const channelUser = await voiceChannelUser()
+  return mongoose.connection.transaction(async (session) => {
+    const application = await Application.findOne({ applicationId, channel: 'VOICE_SIM' }).select('+lookupCodeHash').session(session)
+    const expected = Buffer.from(application?.lookupCodeHash ?? '0'.repeat(64), 'hex')
+    const matches = timingSafeEqual(expected, Buffer.from(lookupHash(code), 'hex'))
+    if (!application || !matches || Date.now() - application.createdAt.getTime() > RECORDING_UPLOAD_WINDOW_MS) throw new HttpError(403, 'FORBIDDEN', 'This call recording cannot be attached.')
+    if (await CallRecording.exists({ applicationId }).session(session)) throw new HttpError(409, 'ALREADY_STORED', 'This call recording is already stored.')
+    const sha256 = createHash('sha256').update(audio).digest('hex')
+    const updated = await advance(application, session)
+    const [recording] = await CallRecording.create([{ applicationId, mimeType, bytes: audio.length, sha256, audio }], { session })
+    await appendAudit({
+      applicationId, sequence: updated.auditSequence, action: 'CALL_RECORDING_STORED', actorUserId: channelUser._id, actorRole: 'SYSTEM', channel: 'VOICE_16699_SIM',
+      newState: { recordingId: recording.id, bytes: audio.length, mimeType, sha256 },
+    }, session)
+    return { applicationId, bytes: audio.length }
+  })
+}
+
+export async function getCallRecording(applicationId, actor) {
+  await officeApplication(applicationId, actor)
+  const recording = await CallRecording.findOne({ applicationId }).select('+audio')
+  if (!recording) throw new HttpError(404, 'NOT_FOUND', 'No call recording is stored.')
+  return recording
 }
 
 export async function acceptApplication(applicationId, reason, actor) {
@@ -225,6 +265,20 @@ export async function reviewApplication(applicationId, { reviewState, reason }, 
       reason,
     }, session)
     return { applicationId, reviewState, status: updated.status }
+  })
+}
+
+export async function overridePriority(applicationId, { priorityDecision, reason }, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const application = await officeApplication(applicationId, actor, session)
+    if (application.priorityDecision === priorityDecision) throw new HttpError(409, 'NO_CHANGE', 'Choose a different priority decision.')
+    const updated = await advance(application, session, { priorityDecision })
+    await appendAudit({
+      applicationId, caseId: application.caseId, sequence: updated.auditSequence,
+      action: 'HUMAN_PRIORITY_OVERRIDE', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
+      previousState: { priorityDecision: application.priorityDecision ?? null }, newState: { priorityDecision }, reason,
+    }, session)
+    return { applicationId, priorityDecision }
   })
 }
 
@@ -392,22 +446,39 @@ export async function recordConsent(applicationId, { scope, state, attestation }
 export async function getApplication(applicationId, actor) {
   const application = await Application.findOne({ applicationId }).lean()
   if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
-  if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)) {
+  const mediationAccess = (hasOfficeRole(actor, 'MEDIATOR', application.officeCode)
+      && await Mediation.exists({ applicationId, officeCode: application.officeCode, $or: [{ mediatorUserId: actor.userId }, { mediatorUserId: null }] }))
+    || (hasOfficeRole(actor, 'CLAO', application.officeCode) && await Mediation.exists({ applicationId, officeCode: application.officeCode }))
+  if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode) && !mediationAccess) {
     throw new HttpError(403, 'FORBIDDEN', 'This role cannot read the application.')
   }
-  const [person, nextTask, representation] = await Promise.all([
+  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence] = await Promise.all([
     Person.findById(application.applicantPersonId).select('displayName identityStatus').lean(),
     Task.findOne({ applicationId, status: 'OPEN' }).sort({ createdAt: 1 }).select('title ownerRole nextAction dueAt').lean(),
     Representation.findOne({ applicationId }).sort({ createdAt: -1 }).populate('representativePersonId', 'displayName').lean(),
+    AssistanceRecord.findOne({ applicationId }).populate('helperPersonId', 'displayName').populate('translatorPersonId', 'displayName').populate('typistPersonId', 'displayName').lean(),
+    ConsentRecord.findOne({ applicationId, scope: 'ASSISTED_INTAKE' }).sort({ revision: -1 }).select('state').lean(),
+    CaseFact.findOne({ applicationId, field: 'safety.urgent' }).sort({ revision: -1 }).select('value revision sourceType').lean(),
+    AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive').lean(),
+    Document.countDocuments({ applicationId, sensitivity: 'RESTRICTED' }),
   ])
   return {
     applicationId, caseId: application.caseId ?? null, status: application.status,
-    reviewState: application.reviewState, version: application.version, channel: application.channel,
+    reviewState: application.reviewState, priorityDecision: application.priorityDecision ?? null, version: application.version, channel: application.channel,
     officeCode: application.officeCode, applicantName: person?.displayName ?? 'Unavailable',
     identityStatus: person?.identityStatus ?? 'INCOMPLETE', nextTask,
+    urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, restrictedEvidence }),
     representation: representation ? {
       representativeName: representation.representativePersonId?.displayName ?? 'Unavailable',
       relationship: representation.relationship, authorityStatus: representation.authorityStatus,
+    } : null,
+    assistance: assistance ? {
+      helperName: assistance.helperPersonId?.displayName ?? 'Unavailable',
+      translatorName: assistance.translatorPersonId?.displayName ?? 'Unavailable',
+      typistName: assistance.typistPersonId?.displayName ?? 'Unavailable',
+      originalLanguage: assistance.originalLanguage, caseType: assistance.caseType,
+      originalConfirmed: assistance.originalConfirmed, translationConfirmed: assistance.translationConfirmed,
+      consentState: assistedConsent?.state ?? 'PENDING',
     } : null,
   }
 }
@@ -425,20 +496,88 @@ export async function listWorkspace(role, actor) {
   if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This role is not assigned to this user.')
   if (role === 'DLAO_OFFICER' || role === 'CASE_SUPPORT') {
     const applications = await Application.find({ officeCode: assignment.officeCode })
-      .sort({ updatedAt: -1 }).limit(25).select('applicationId caseId status reviewState applicantPersonId updatedAt').lean()
+      .sort({ updatedAt: -1 }).select('applicationId caseId status reviewState priorityDecision channel applicantPersonId createdAt updatedAt').lean()
+    const ids = applications.map(({ applicationId }) => applicationId)
+    const [people, tasks, urgentFacts, aiEvents, restricted, referrals, lawyerUpdates] = await Promise.all([
+      Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName identityStatus').lean(),
+      Task.find({ applicationId: { $in: ids }, status: 'OPEN' }).select('applicationId kind dueAt createdAt nextAction').lean(),
+      CaseFact.find({ applicationId: { $in: ids }, field: 'safety.urgent' }).sort({ revision: -1 }).select('applicationId value revision sourceType').lean(),
+      AuditEvent.find({ applicationId: { $in: ids }, action: 'APPLICATION_SUBMITTED' }).select('applicationId newState.aiSensitive').lean(),
+      Document.find({ applicationId: { $in: ids }, sensitivity: 'RESTRICTED' }).select('applicationId').lean(),
+      Referral.find({ applicationId: { $in: ids }, status: { $in: ['SENT', 'ACKNOWLEDGED'] } }).select('applicationId status dueAt receivingOfficeCode').lean(),
+      LawyerUpdate.find({ applicationId: { $in: ids }, $or: [{ status: 'MISSED' }, { status: 'PENDING', dueAt: { $lte: new Date() } }] }).select('applicationId sequence status dueAt').lean(),
+    ])
+    const names = new Map(people.map((person) => [person._id.toString(), person.displayName]))
+    const identities = new Map(people.map((person) => [person._id.toString(), person.identityStatus]))
+    const tasksByApplication = Map.groupBy(tasks, (task) => task.applicationId)
+    const urgency = new Map()
+    for (const fact of urgentFacts) if (!urgency.has(fact.applicationId)) urgency.set(fact.applicationId, fact.value === 'YES' && fact)
+    const aiSensitive = new Set(aiEvents.filter((event) => event.newState?.aiSensitive).map((event) => event.applicationId))
+    const restrictedCounts = Map.groupBy(restricted, (item) => item.applicationId)
+    const waiting = new Map(referrals.map((referral) => [referral.applicationId, referral]))
+    const missedUpdates = Map.groupBy(lawyerUpdates, (item) => item.applicationId)
+    const now = Date.now()
+    // ponytail: full-office scan suits fictional demo data; add indexed pagination when real volume warrants it.
+    const records = applications.map((item) => ({
+      applicationId: item.applicationId, caseId: item.caseId ?? null, status: item.status,
+      reviewState: item.reviewState, priorityDecision: item.priorityDecision ?? null, channel: item.channel,
+      applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
+      createdAt: item.createdAt, updatedAt: item.updatedAt,
+      flags: queueFlags(item, identities.get(item.applicantPersonId.toString()), tasksByApplication.get(item.applicationId) ?? [],
+        urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0 }),
+        waiting.get(item.applicationId), missedUpdates.get(item.applicationId) ?? [], now),
+    }))
+    const counts = Object.fromEntries(['NEW', 'INCOMPLETE', 'URGENT_RECOMMENDATION', 'PENDING', 'OVERDUE', 'REFERRAL_WAITING', 'LAWYER_UPDATE_OVERDUE'].map((flag) => [flag, records.filter((record) => record.flags.some((item) => item.code === flag)).length]))
+    return { role, officeCode: assignment.officeCode, records, report: { total: records.length, accepted: records.filter((item) => item.status === 'ACCEPTED').length, byChannel: Object.fromEntries([...new Set(records.map((item) => item.channel))].map((channel) => [channel, records.filter((item) => item.channel === channel).length])), counts }, unavailableQueues: [] }
+  }
+  if (role === 'MEDIATOR' || role === 'CLAO') {
+    const filter = { officeCode: assignment.officeCode, stage: role === 'CLAO' ? 'PENDING_CLAO_CERTIFICATION' : { $ne: 'CERTIFIED_FINAL' } }
+    if (role === 'MEDIATOR') filter.$or = [{ mediatorUserId: actor.userId }, { mediatorUserId: null }]
+    const mediations = await Mediation.find(filter).sort({ updatedAt: -1 }).limit(50).select('applicationId caseId stage legalEffectState').lean()
+    const applications = await Application.find({ applicationId: { $in: mediations.map(({ applicationId }) => applicationId) } }).select('applicationId status reviewState applicantPersonId').lean()
     const people = await Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName').lean()
     const names = new Map(people.map((person) => [person._id.toString(), person.displayName]))
-    return { role, officeCode: assignment.officeCode, records: applications.map((item) => ({
-      applicationId: item.applicationId, caseId: item.caseId ?? null, status: item.status,
-      reviewState: item.reviewState, applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
-      updatedAt: item.updatedAt,
+    const records = new Map(applications.map((item) => [item.applicationId, item]))
+    return { role, officeCode: assignment.officeCode, records: mediations.map((mediation) => {
+      const item = records.get(mediation.applicationId)
+      return { applicationId: mediation.applicationId, caseId: mediation.caseId, status: item?.status, reviewState: item?.reviewState, applicantName: names.get(item?.applicantPersonId?.toString()) ?? 'Unavailable', mediationStage: mediation.stage, legalEffectState: mediation.legalEffectState }
+    }) }
+  }
+  if (role === 'RECEIVING_DLAO') {
+    // ponytail: newest 50 referrals only; add paging when an office receives more.
+    const referrals = await Referral.find({ receivingOfficeCode: assignment.officeCode }).sort({ createdAt: -1 }).limit(50)
+      .select('applicationId caseId status dueAt sendingOfficeCode').lean()
+    const now = Date.now()
+    return { role, officeCode: assignment.officeCode, records: referrals.map((referral) => ({
+      referralId: referral._id, applicationId: referral.applicationId, caseId: referral.caseId, status: referral.status,
+      sendingOfficeCode: referral.sendingOfficeCode, dueAt: referral.dueAt, overdue: referral.status === 'SENT' && referral.dueAt.getTime() < now,
     })) }
   }
   if (role === 'PANEL_LAWYER') {
-    const assignments = await LawyerAssignment.find({ lawyerUserId: actor.userId, active: true }).select('caseId applicationId').limit(25).lean()
-    return { role, officeCode: assignment.officeCode, records: assignments.map(({ caseId, applicationId }) => ({ caseId, applicationId })) }
+    const assignments = await LawyerAssignment.find({ lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).select('caseId applicationId status').limit(25).lean()
+    return { role, officeCode: assignment.officeCode, records: assignments.map(({ _id, caseId, applicationId, status }) => ({ assignmentId: _id, caseId, applicationId, assignmentStatus: status })) }
   }
   return { role, officeCode: assignment.officeCode, records: [] }
+}
+
+function queueFlags(application, identityStatus, tasks, urgentReasons, referral, missedUpdates, now) {
+  const flags = []
+  const oldestOpenDays = tasks.length ? Math.floor((now - Math.min(...tasks.map((task) => new Date(task.createdAt).getTime()))) / 86400000) : 0
+  if (application.status === 'SUBMITTED' && application.reviewState === 'PENDING_REVIEW') flags.push({ code: 'NEW', reason: 'Submitted; first human review has not been recorded.' })
+  if (application.reviewState === 'NEEDS_INFORMATION' || identityStatus === 'INCOMPLETE') flags.push({ code: 'INCOMPLETE', reason: application.reviewState === 'NEEDS_INFORMATION' ? 'Officer requested more information.' : 'Identity is still recorded as incomplete.' })
+  if (urgentReasons.length) flags.push({ code: 'URGENT_RECOMMENDATION', reason: `${urgentReasons.join(' ')} Human decision: ${application.priorityDecision ?? 'not recorded'}.` })
+  if (tasks.length) flags.push({ code: 'PENDING', reason: `${tasks.length} open task${tasks.length === 1 ? '' : 's'} need a human next action.` })
+  const overdue = tasks.find((task) => task.dueAt && new Date(task.dueAt).getTime() < now)
+  // ponytail: demo ageing threshold only; office-approved service targets must replace it before real operations.
+  const escalated = tasks.some((task) => task.kind === 'ROUTING_DECISION')
+  if (escalated || referral) {
+    flags.push({ code: 'REFERRAL_WAITING', reason: escalated ? 'Repeated referral returns were escalated; an authorised routing decision is required.'
+      : referral.status === 'SENT' ? `Awaiting acknowledgement from ${referral.receivingOfficeCode}${new Date(referral.dueAt).getTime() < now ? '; the deadline has passed' : ''}.`
+        : `Acknowledged by ${referral.receivingOfficeCode}; awaiting accept or return.` })
+  }
+  if (missedUpdates.length) flags.push({ code: 'LAWYER_UPDATE_OVERDUE', reason: `${missedUpdates.length} mandatory panel-lawyer update${missedUpdates.length === 1 ? ' is' : 's are'} overdue or missed; review a safe next step before asking the applicant to travel.` })
+  if (overdue || (tasks.length && oldestOpenDays >= (application.status === 'SUBMITTED' ? 2 : 7))) flags.push({ code: 'OVERDUE', reason: overdue ? 'An open task passed its explicit due date.' : `Oldest open task is ${oldestOpenDays} days old; demo reminder threshold reached.` })
+  return flags
 }
 
 export async function listTasks(applicationId, actor) {
@@ -503,6 +642,9 @@ export async function recordContactAttempt(applicationId, { channel, outcome, re
   return mongoose.connection.transaction(async (session) => {
     const application = await officeApplication(applicationId, actor, session)
     const profile = await SafeContactProfile.findOne({ applicationId }).sort({ version: -1 }).session(session)
+    if (!['BLOCKED_UNSAFE', 'UNKNOWN_PERSON'].includes(outcome) && (!profile?.allowedChannels.includes(channel) || profile.prohibitedChannels.includes(channel))) {
+      throw new HttpError(409, 'UNSAFE_CONTACT', 'This channel is not permitted by the active safe-contact profile.')
+    }
     const updated = await advance(application, session)
     const [attempt] = await ContactAttempt.create([{
       applicationId, caseId: application.caseId, channel, outcome, reason,
@@ -549,14 +691,90 @@ export async function getApplicationAudit(applicationId, actor) {
   return getAuditTrail(applicationId)
 }
 
+export async function getCaseHistory(applicationId, actor) {
+  const application = await Application.findOne({ applicationId }).select('officeCode').lean()
+  if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
+  if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot reconstruct this record.')
+  const trail = await getAuditTrail(applicationId)
+  return { valid: trail.valid, events: trail.events.map(({ action, actorRole, createdAt }) => ({ action, actorRole, createdAt })) }
+}
+
+export async function verifyHelplineLookup(identifier, code, actor, contactChannel = 'PHONE', session) {
+  const applicationId = identifier.startsWith('APP-') ? identifier : (await Case.findOne({ caseId: identifier }).select('applicationId').lean())?.applicationId
+  const query = applicationId && Application.findOne({ applicationId }).select('+lookupCodeHash')
+  if (query && session) query.session(session)
+  const application = query && await query.lean()
+  const permitted = application && hasOfficeRole(actor, 'HELPLINE_AGENT', application.officeCode)
+  const expected = Buffer.from(application?.lookupCodeHash ?? '0'.repeat(64), 'hex')
+  const supplied = Buffer.from(lookupHash(code), 'hex')
+  if (!permitted || !timingSafeEqual(expected, supplied)) throw new HttpError(404, 'NOT_FOUND', 'No permitted status lookup matched.')
+  const profileQuery = SafeContactProfile.findOne({ applicationId }).sort({ version: -1 }).select('version allowedChannels prohibitedChannels')
+  if (session) profileQuery.session(session)
+  const profile = await profileQuery.lean()
+  if (!['PHONE', 'IN_PERSON'].includes(contactChannel) || !profile?.allowedChannels.includes(contactChannel) || profile.prohibitedChannels.includes(contactChannel)) throw new HttpError(403, 'UNSAFE_CONTACT', 'This status route is not permitted by the active safe-contact profile.')
+  return { applicationId, application, profile }
+}
+
+export async function lookupHelplineStatus(identifier, code, actor, contactChannel = 'PHONE') {
+  return mongoose.connection.transaction(async (session) => {
+    const { applicationId, profile } = await verifyHelplineLookup(identifier, code, actor, contactChannel, session)
+    const current = await Application.findOne({ applicationId }).session(session)
+    const casePlan = current.caseId ? await Case.findOne({ caseId: current.caseId }).select('nextHearingAt nextAction').session(session).lean() : null
+    const updated = await advance(current, session)
+    const [attempt] = await ContactAttempt.create([{
+      applicationId, caseId: current.caseId, channel: contactChannel, outcome: 'STATUS_LOOKUP',
+      reason: 'Helpline agent attested caller verification and used the caller-provided lookup code on an allowed safe channel; generic status only.',
+      disclosedSensitive: false, safeContactVersion: profile.version, recordedByUserId: actor.userId,
+    }], { session })
+    await appendAudit({
+      applicationId, caseId: current.caseId, sequence: updated.auditSequence,
+      action: 'HELPLINE_STATUS_LOOKUP', actorUserId: actor.userId, actorRole: 'HELPLINE_AGENT', channel: 'HELPLINE_SIM',
+      newState: { contactAttemptId: attempt.id, disclosedSensitive: false, safeContactVersion: profile.version, contactChannel, callerVerification: 'HUMAN_ATTESTED' },
+    }, session)
+    const nextStep = current.status === 'ACCEPTED' ? (casePlan?.nextAction || 'An officer is handling the case. Use the agreed safe channel for further details.')
+      : current.reviewState === 'NEEDS_INFORMATION' ? 'More information is needed. Arrange a safe follow-up with the office.'
+        : 'The application is awaiting an officer decision. No decision has been made here.'
+    return { applicationId, caseId: current.caseId ?? null, status: current.status, nextHearingAt: casePlan?.nextHearingAt ?? null, nextAction: casePlan?.nextAction ?? null, nextStep }
+  })
+}
+
 export async function getCase(caseId, actor) {
   const record = await Case.findOne({ caseId }).lean()
   if (!record) throw new HttpError(404, 'NOT_FOUND', 'Case not found.')
   const officeAccess = hasOfficeRole(actor, 'DLAO_OFFICER', record.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', record.officeCode)
-  const lawyerAccess = actor.assignments.some(({ role }) => role === 'PANEL_LAWYER')
-    && await LawyerAssignment.exists({ caseId, lawyerUserId: actor.userId, active: true })
-  if (!officeAccess && !lawyerAccess) throw new HttpError(403, 'FORBIDDEN', 'This case is not assigned to this user.')
-  return { caseId, applicationId: record.applicationId, status: record.status }
+  if (officeAccess) return { caseId, applicationId: record.applicationId, status: record.status, nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null }
+  const assignment = actor.assignments.some(({ role, officeCode }) => role === 'PANEL_LAWYER' && officeCode === record.officeCode)
+    && await LawyerAssignment.findOne({ caseId, lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).lean()
+  if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This case is not assigned to this user.')
+  if (assignment.status === 'PENDING') return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: 'PENDING' }
+  const documents = await Document.find({ applicationId: record.applicationId, sensitivity: 'STANDARD' }).sort({ createdAt: 1 }).limit(20).select('label currentVersion').lean()
+  // ponytail: first 20 standard documents for the demo; add paging when case files grow beyond the prototype.
+  const versions = await DocumentVersion.find({ applicationId: record.applicationId, documentId: { $in: documents.map(({ _id }) => _id) } })
+    .sort({ version: -1 }).select('+textContent version label qualityState contentHash documentId').lean()
+  const latest = new Map()
+  for (const version of versions) if (!latest.has(version.documentId.toString())) latest.set(version.documentId.toString(), version)
+  const [updates, payment] = await Promise.all([
+    LawyerUpdate.find({ assignmentId: assignment._id }).sort({ sequence: 1 }).select('sequence dueAt instruction status missedAt submittedAt report nextAction').lean(),
+    LawyerPaymentEvent.findOne({ assignmentId: assignment._id }).sort({ createdAt: -1 }).select('stage status reason createdAt').lean(),
+  ])
+  return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: assignment.status,
+    nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null, updates,
+    payment: payment ?? null, documents: documents.map((document) => ({ id: document._id, label: document.label, currentVersion: document.currentVersion, version: latest.get(document._id.toString()) ?? null })) }
+}
+
+const explicitlyGranted = (document, actor) => document.accessState === 'EXPLICIT_GRANT' && document.allowedUserIds.some((id) => id.equals(actor.userId))
+
+// Office roles read standard documents; restricted evidence needs a per-user grant or an active referral naming this user.
+async function documentAccess(document, application, actor) {
+  const restricted = document.sensitivity === 'RESTRICTED'
+  const staff = hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)
+  if (staff && (!restricted || explicitlyGranted(document, actor))) return { basis: restricted ? 'EXPLICIT_GRANT' : 'OFFICE' }
+  if (!actor.assignments.some(({ role }) => role === 'RECEIVING_DLAO')) return null
+  const referral = await Referral.findOne({
+    responsibleUserId: actor.userId, status: { $in: ['SENT', 'ACKNOWLEDGED', 'ACCEPTED'] },
+    [restricted ? 'sensitiveDocumentIds' : 'documentIds']: document._id,
+  }).select('receivingOfficeCode').lean()
+  return referral && hasOfficeRole(actor, 'RECEIVING_DLAO', referral.receivingOfficeCode) ? { basis: 'REFERRAL', referralId: referral._id } : null
 }
 
 export async function getDocument(documentId, actor) {
@@ -564,9 +782,14 @@ export async function getDocument(documentId, actor) {
   if (!document) throw new HttpError(404, 'NOT_FOUND', 'Document not found.')
   const application = await Application.findOne({ applicationId: document.applicationId }).lean()
   if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
-  const staffRole = hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)
-  const explicitGrant = document.accessState === 'EXPLICIT_GRANT' && document.allowedUserIds.some((id) => id.equals(actor.userId))
-  if (!staffRole || (document.sensitivity === 'RESTRICTED' && !explicitGrant)) throw new HttpError(403, 'FORBIDDEN', 'This evidence is restricted.')
+  const access = await documentAccess(document, application, actor)
+  if (document.sensitivity === 'RESTRICTED') {
+    await EvidenceAccessLog.create({
+      applicationId: document.applicationId, documentId: document._id, userId: actor.userId, roles: actor.assignments.map(({ role }) => role),
+      outcome: access ? 'GRANTED' : 'DENIED', basis: access?.basis ?? 'NONE', referralId: access?.referralId,
+    })
+  }
+  if (!access) throw new HttpError(403, 'FORBIDDEN', 'This evidence is restricted.')
   const version = await DocumentVersion.findOne({ documentId: document._id }).sort({ version: -1 }).select('version label qualityState note createdAt').lean()
   return { id: document._id, applicationId: document.applicationId, label: document.label, sensitivity: document.sensitivity, accessState: document.accessState, currentVersion: document.currentVersion, version }
 }
@@ -576,32 +799,50 @@ export async function listDocuments(applicationId, actor) {
   if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
   if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot read documents.')
   const documents = await Document.find({ applicationId }).sort({ createdAt: -1 }).lean()
-  return documents
-    .filter((item) => item.sensitivity !== 'RESTRICTED' || (item.accessState === 'EXPLICIT_GRANT' && item.allowedUserIds.some((id) => id.equals(actor.userId))))
-    .map(({ _id, label, sensitivity, currentVersion }) => ({ id: _id, label, sensitivity, currentVersion }))
+  // Ungranted staff learn only that restricted evidence exists, never its label.
+  return documents.map((item) => item.sensitivity !== 'RESTRICTED' || explicitlyGranted(item, actor)
+    ? { id: item._id, label: item.label, sensitivity: item.sensitivity, currentVersion: item.currentVersion }
+    : { id: item._id, label: 'Restricted evidence (no access grant)', sensitivity: item.sensitivity, redacted: true })
 }
 
-export async function createDocumentMetadata(applicationId, { label, qualityState, note }, actor) {
+export async function listEvidenceAccess(applicationId, actor) {
+  await officeApplication(applicationId, actor)
+  const [entries, documents] = await Promise.all([
+    EvidenceAccessLog.find({ applicationId }).sort({ createdAt: -1 }).limit(100).populate('userId', 'displayName').lean(),
+    Document.find({ applicationId, sensitivity: 'RESTRICTED' }).select('label accessState allowedUserIds').lean(),
+  ])
+  const labels = new Map(documents.map((item) => [item._id.toString(), explicitlyGranted(item, actor) ? item.label : 'Restricted evidence']))
+  return entries.map((entry) => ({
+    id: entry._id, document: labels.get(entry.documentId.toString()) ?? 'Restricted evidence', user: entry.userId?.displayName ?? 'Unavailable',
+    roles: entry.roles, outcome: entry.outcome, basis: entry.basis, createdAt: entry.createdAt,
+  }))
+}
+
+export async function createDocumentMetadata(applicationId, { label, qualityState, note, filename, textContent, checklistItem, sensitivity = 'STANDARD' }, actor) {
   return mongoose.connection.transaction(async (session) => {
     const application = await officeApplication(applicationId, actor, session)
     const updated = await advance(application, session)
+    // Restricting at first upload leaves no window where every office role could read it; only the classifying officer is granted.
     const [document] = await Document.create([{
-      applicationId, caseId: application.caseId, label, sensitivity: 'STANDARD',
+      applicationId, caseId: application.caseId, label, checklistItem, sensitivity,
+      ...(sensitivity === 'RESTRICTED' ? { accessState: 'EXPLICIT_GRANT', allowedUserIds: [actor.userId] } : {}),
     }], { session })
     await DocumentVersion.create([{
       applicationId, caseId: application.caseId, documentId: document._id,
-      version: 1, label, qualityState, note, recordedByUserId: actor.userId,
+      version: 1, label, qualityState, note, filename, textContent,
+      contentHash: textContent ? createHash('sha256').update(textContent).digest('hex') : undefined,
+      recordedByUserId: actor.userId,
     }], { session })
     await appendAudit({
       applicationId, caseId: application.caseId, sequence: updated.auditSequence,
-      action: 'DOCUMENT_METADATA_CREATED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER',
-      newState: { documentId: document.id, version: 1, qualityState },
+      action: textContent ? 'DOCUMENT_TEXT_UPLOADED' : 'DOCUMENT_METADATA_CREATED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER',
+      newState: { documentId: document.id, version: 1, qualityState, sensitivity, contentHash: textContent ? createHash('sha256').update(textContent).digest('hex') : null, checklistItem: checklistItem ?? null },
     }, session)
-    return { id: document.id, applicationId, label, currentVersion: 1, qualityState }
+    return { id: document.id, applicationId, label, currentVersion: 1, qualityState, sensitivity }
   })
 }
 
-export async function addDocumentVersion(documentId, { label, qualityState, note }, actor) {
+export async function addDocumentVersion(documentId, { label, qualityState, note, filename, textContent, checklistItem }, actor) {
   return mongoose.connection.transaction(async (session) => {
     const document = await Document.findById(documentId).session(session)
     if (!document) throw new HttpError(404, 'NOT_FOUND', 'Document not found.')
@@ -609,21 +850,22 @@ export async function addDocumentVersion(documentId, { label, qualityState, note
     if (document.sensitivity === 'RESTRICTED' && (document.accessState !== 'EXPLICIT_GRANT' || !document.allowedUserIds.some((id) => id.equals(actor.userId)))) throw new HttpError(403, 'FORBIDDEN', 'This evidence is restricted.')
     const changed = await Document.findOneAndUpdate(
       { _id: document._id, currentVersion: document.currentVersion },
-      { $inc: { currentVersion: 1 }, $set: { label } },
+      { $inc: { currentVersion: 1 }, $set: { label, ...(checklistItem ? { checklistItem } : {}) } },
       { returnDocument: 'after', session },
     )
     if (!changed) throw new HttpError(409, 'CONFLICT', 'The document changed. Refresh and retry.')
     const updated = await advance(application, session)
     const [version] = await DocumentVersion.create([{
       applicationId: application.applicationId, caseId: application.caseId,
-      documentId: document._id, version: changed.currentVersion, label, qualityState, note,
+      documentId: document._id, version: changed.currentVersion, label, qualityState, note, filename, textContent,
+      contentHash: textContent ? createHash('sha256').update(textContent).digest('hex') : undefined,
       recordedByUserId: actor.userId,
     }], { session })
     await appendAudit({
       applicationId: application.applicationId, caseId: application.caseId, sequence: updated.auditSequence,
       action: 'DOCUMENT_VERSION_ADDED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER',
       previousState: { documentId: document.id, version: document.currentVersion },
-      newState: { documentId: document.id, version: version.version, qualityState },
+      newState: { documentId: document.id, version: version.version, qualityState, contentHash: version.contentHash ?? null },
     }, session)
     return { documentId: document.id, version: version.version, qualityState }
   })

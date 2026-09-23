@@ -1,248 +1,431 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { api } from '../services/api.js'
-import { appendTranscript, applyToolCall, guidance, openLiveSession } from '../utils/liveVoice.js'
-import { activeFields, answer, consentScopes, correct, displayValue, nextField, payload, requestHuman, startCall, steps } from '../utils/voiceScript.js'
+import { appendTranscript, applyExtraction, closeMicrophone, openMicrophone, startRecording } from '../utils/voiceAgent.js'
+import { activeFields, answer, correct, displayValue, nextField, payload, startCall, steps } from '../utils/voiceScript.js'
 
-// Bangla is what callers and screen readers get; the English gloss is visual help for reviewers only.
-const Gloss = ({ children }) => <span className="gloss" lang="en" aria-hidden="true">{children}</span>
-const say = ([bangla, english]) => <>{bangla} <Gloss>{english}</Gloss></>
-
+// A phone-call screen for the 16699 simulation, run like an IVR line: a recorded Bangla clip asks each question,
+// the caller answers choices and numbers on the keypad, speaks other answers after the beep and presses # when done.
+// The whole call is recorded under the greeting's notice.
 const copy = {
-  disclosure: ['এটি প্রতিযোগিতার জন্য তৈরি একটি প্রোটোটাইপ ও সিমুলেশন — জাতীয় ১৬৬৯৯ টেলিফোন সেবার আসল সংযোগ নয়। শুধু কাল্পনিক তথ্য দিন। ভয়েসে কথা বলুন, অথবা এআই ছাড়াই কীবোর্ডে উত্তর দিন।', 'This is a competition prototype and simulation, not the live national 16699 telephone service. Use fictional information only. Talk by voice, or answer by keyboard without AI.'],
-  live: {
-    CONNECTING: ['মাইক্রোফোন ও লাইভ ভয়েস চালু হচ্ছে…', 'Starting the microphone and live voice…'],
-    ON: ['লাইভ ভয়েস চালু। আপনি একটি এআই সহকারীর সাথে কথা বলছেন; সব তথ্য একজন কর্মকর্তা পর্যালোচনা করবেন। প্রশ্নের উত্তর মুখে বলুন।', 'Live voice is on. You are talking to an AI assistant; an officer reviews everything. Answer aloud.'],
-    FAILED: ['লাইভ ভয়েস এখন পাওয়া যাচ্ছে না। আপনার উত্তরগুলো রাখা আছে — কীবোর্ডে চালিয়ে যান।', 'Live voice is unavailable right now. Your answers are kept; continue with the keyboard.'],
-  },
-  handoff: {
-    URGENT_HANDOFF: ['আপনার নিরাপত্তাই আগে। আর কোনো বিস্তারিত প্রশ্ন নয় — শুধু নিরাপদে যোগাযোগের তথ্য নেব, একজন মানুষ যোগাযোগ করবেন। তাৎক্ষণিক বিপদে ৯৯৯-এ ফোন করুন।', 'Your safety comes first. No more detailed questions: only safe contact details, and a person will follow up. In immediate danger, call 999.'],
-    LIVE_VOICE_REFUSED: ['ঠিক আছে। লাইভ ভয়েস ছাড়াই, শুধু কলব্যাকের জন্য সামান্য তথ্য নেব।', 'Understood. Without live voice, we will take only minimal details for a callback.'],
-    CALLER_REQUESTED_HUMAN: ['ঠিক আছে। একজন মানুষ আপনাকে ফোন করবেন; শুধু কলব্যাকের জন্য সামান্য তথ্য নেব।', 'Understood. A person will call you back; we will take only minimal details.'],
-    SENSITIVE_OR_UNCLEAR: ['বিষয়টি একজন মানুষের দেখা দরকার। শুধু কলব্যাকের জন্য সামান্য তথ্য নেব।', 'This needs a person. We will take only minimal details for a callback.'],
-  },
-  consentDraft: ['খসড়া ভাষা — আইনি দলের অনুমোদন বাকি।', 'Placeholder wording pending law-team approval.'],
-  representative: ['আপনি প্রতিনিধি হিসেবে এই তথ্য দিয়েছেন। আবেদনকারী নিজে নিশ্চিত না করা পর্যন্ত এটি “প্রতিনিধির দেওয়া তথ্য” হিসেবে থাকবে, আর আপনার প্রতিনিধিত্বের অনুমতি এখনও যাচাই হয়নি।', 'You gave this as a representative. It stays marked representative-reported until the applicant confirms it personally, and your authority to act for them is not yet verified.'],
-  identity: ['পরিচয় যাচাই এখনও অসম্পূর্ণ; একজন কর্মকর্তা পরে দেখবেন।', 'Identity is not yet verified; an officer will check it later.'],
-  failed: ['জমা দেওয়া যায়নি। কিছুই জমা হয়নি; আপনার উত্তরগুলো রাখা আছে। আবার চেষ্টা করুন।', 'Could not submit. Nothing was saved; your answers are kept. Please try again.'],
-  review: ['একজন লিগ্যাল এইড কর্মকর্তা এটি পর্যালোচনা করবেন। কোনো সিদ্ধান্ত স্বয়ংক্রিয়ভাবে নেওয়া হয়নি।', 'A legal aid officer will review it. No decision was made automatically.'],
-  callback: ['একজন কর্মী আপনার দেওয়া নিরাপদ নম্বরে, নিরাপদ সময়ে ফোন করবেন।', 'A staff member will call the safe number you gave, at the safe time.'],
-  audioDenied: ['আপনি অডিও সংরক্ষণে রাজি হননি, তাই কোনো রেকর্ডিং রাখা হয়নি। সেবা চালু আছে।', 'You declined audio storage, so no recording was kept. Your service continues.'],
+  simulation: 'ওয়েব সিমুলেশন · আসল ফোন কল নয়',
+  call: 'কল করুন',
+  hangUp: 'কল শেষ করুন',
+  hangUpConfirm: 'কল শেষ করবেন? আপনার উত্তরগুলো জমা হবে না।',
+  recording: 'কলটি রেকর্ড হচ্ছে',
+  repeatKey: 'আবার শুনুন',
+  finishKey: 'শেষ',
+  submitKey: 'জমা দিন',
+  typeInstead: 'লিখে উত্তর দিন',
+  readback: 'যা বলেছেন, একবার দেখে নিন',
+  listening: 'শুনছি… বলা শেষ হলে # চাপুন।',
+  transcribing: 'আপনার কথা বোঝা হচ্ছে…',
+  submitting: 'আবেদন জমা হচ্ছে…',
+  micDenied: 'মাইক্রোফোন চালু করা যায়নি। কিপ্যাডে বা লিখে উত্তর দিন।',
+  voiceOff: 'ভয়েস বোঝার সেবা এখন পাওয়া যাচ্ছে না। লিখে উত্তর দিন; আপনার উত্তরগুলো রাখা আছে।',
+  urgent: 'আপনার নিরাপত্তাই আগে। শুধু যোগাযোগের তথ্য নেব, একজন কর্মী ফোন করবেন। তাৎক্ষণিক বিপদে ৯৯৯-এ ফোন করুন।',
+  representative: 'এগুলো প্রতিনিধির দেওয়া তথ্য; আবেদনকারী নিজে নিশ্চিত না করা পর্যন্ত এভাবেই থাকবে।',
+  failed: 'জমা দেওয়া যায়নি; আপনার উত্তরগুলো রাখা আছে। আবার ১ চাপুন।',
+  review: 'একজন লিগ্যাল এইড কর্মকর্তা আবেদনটি দেখে যোগাযোগ করবেন।',
+  callback: 'একজন কর্মী আপনার দেওয়া নিরাপদ নম্বরে, নিরাপদ সময়ে ফোন করবেন।',
+  code: 'স্ট্যাটাস জানার গোপন কোড',
+  codeNote: 'কোডটি একবারই দেখানো হচ্ছে। লিখে রাখুন, কাউকে দেবেন না।',
+  newCall: 'নতুন কল',
 }
 
-function phaseOf(call, field, live, speaking, status) {
-  if (!call) return 'IDLE'
-  if (status !== 'IDLE') return { PROCESSING: 'PROCESSING', FAILED: 'FAILED_SAFE', DONE: 'COMPLETED' }[status]
-  if (live === 'CONNECTING') return 'REQUESTING_MIC'
-  if (!field) return 'AWAITING_CONFIRMATION'
-  if (consentScopes.includes(field)) return 'EXPLAINING_CONSENT'
-  if (call.mode === 'CALLBACK') return call.reason === 'URGENT_HANDOFF' ? 'HUMAN_HANDOFF' : 'MINIMAL_DATA_FALLBACK'
-  return live === 'ON' && speaking ? 'AI_SPEAKING' : 'LISTENING'
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
+const DTMF = { 1: [697, 1209], 2: [697, 1336], 3: [697, 1477], 4: [770, 1209], 5: [770, 1336], 6: [770, 1477], 7: [852, 1209], 8: [852, 1336], 9: [852, 1477], '*': [941, 1209], 0: [941, 1336], '#': [941, 1477] }
+const NO_INPUT_MS = 12000 // a choice or number question waits this long before the "no answer" clip
+const MIN_SPOKEN_MS = 700 // a # sooner than this after the beep counts as no answer
+const MAX_MISSES = 2 // after this many "no answer" clips in a row, wait quietly for a key
+const bnDigits = (text) => text.replace(/[0-9]/g, (digit) => '০১২৩৪৫৬৭৮৯'[digit])
+const kindOf = (field) => (!field ? 'READBACK' : steps[field].choices ? 'CHOICE' : steps[field].tel ? 'DIGITS' : 'SPOKEN')
+const lightMode = () => { try { return localStorage.getItem('dlas-light-mode') === '1' } catch { return false } }
+
+const PhoneIcon = () => <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.6 21 3 13.4 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.6a1 1 0 0 1-.25 1z" /></svg>
+
+// Short generated tones (key presses and the "speak now" beep); no audio files needed.
+function playTone(context, frequencies, ms = 120) {
+  if (!context || context.state === 'closed') return
+  const gain = context.createGain()
+  gain.gain.value = 0.06
+  gain.connect(context.destination)
+  for (const frequency of frequencies) {
+    const oscillator = context.createOscillator()
+    oscillator.frequency.value = frequency
+    oscillator.connect(gain)
+    oscillator.start()
+    oscillator.stop(context.currentTime + ms / 1000)
+  }
 }
 
-function ChoiceTurn({ field, onAnswer, promptRef }) {
-  const step = steps[field]
+// Plays recorded clips in order. Resolves true when they finish (a missing clip is skipped), false when stopped.
+function createClipPlayer() {
+  const audio = new Audio()
+  let settle = null
+  const playOne = (clip) => new Promise((resolve) => {
+    settle = resolve
+    audio.onended = () => resolve(true)
+    audio.onerror = () => resolve(true)
+    audio.src = `/audio/${clip}.mp3`
+    audio.play().catch(() => resolve(true))
+  })
+  return {
+    async play(clips) {
+      for (const clip of clips) if (!await playOne(clip)) return false
+      return true
+    },
+    stop() { audio.pause(); settle?.(false) },
+  }
+}
+
+const twoDigits = new Intl.NumberFormat('bn-BD', { minimumIntegerDigits: 2 })
+
+// Kept in its own component so the ticking clock re-renders only itself.
+function CallTimer() {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setSeconds((value) => value + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <span className="call-timer" role="timer">{twoDigits.format(Math.floor(seconds / 60))}:{twoDigits.format(seconds % 60)}</span>
+}
+
+function Keypad({ hints, onPress }) {
   return (
-    <div role="group" aria-labelledby="voice-prompt" className="form-stack">
-      <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{step.prompt} <Gloss>{step.en}</Gloss></h2>
-      {consentScopes.includes(field) && <p className="muted">{say(copy.consentDraft)}</p>}
-      <div className="choice-row">
-        {step.choices.map(([value, label, english]) => <button key={label} type="button" className="secondary-button" onClick={() => onAnswer(value)}>{label} <Gloss>{english}</Gloss></button>)}
-      </div>
+    <div className="keypad" role="group" aria-label="কিপ্যাড">
+      {KEYS.map((key) => (
+        <button key={key} type="button" className="keypad-key" onClick={() => onPress(key)}>
+          <span className="keypad-digit">{bnDigits(key)}</span>{hints[key] && <>{' '}<span className="keypad-hint">{hints[key]}</span></>}
+        </button>
+      ))}
     </div>
   )
 }
 
-function TextTurn({ field, initial, onAnswer, promptRef }) {
+function TypedAnswer({ field, initial, onAnswer }) {
   const step = steps[field]
   const [draft, setDraft] = useState(initial ?? '')
   const Field = step.long ? 'textarea' : 'input'
-  const typeProps = step.tel ? { type: 'tel', inputMode: 'tel', pattern: '\\+?[0-9][0-9 \\-]{5,19}' } : {}
   return (
-    <form className="form-stack" onSubmit={(event) => { event.preventDefault(); onAnswer(draft.trim()) }}>
-      <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{step.prompt} <Gloss>{step.en}</Gloss></h2>
+    <form className="call-typed" onSubmit={(event) => { event.preventDefault(); onAnswer(draft.trim()) }}>
       <Field id="voice-answer" name={field} aria-labelledby="voice-prompt" value={draft} onChange={(event) => setDraft(event.target.value)}
-        required minLength={step.min ?? 2} maxLength={step.max ?? 20} autoComplete="off" {...typeProps} />
-      <button type="submit">উত্তর দিন <Gloss>Answer</Gloss></button>
+        required minLength={step.min ?? 2} maxLength={step.max ?? 20} autoComplete="off" autoFocus />
+      <button type="submit" className="secondary-button">উত্তর দিন</button>
     </form>
   )
 }
 
-function LiveTurn({ field, captions, promptRef, onKeyboard }) {
+function Readback({ call, recordings, onCorrect }) {
   return (
-    <div className="form-stack">
-      <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{steps[field].prompt} <Gloss>{steps[field].en}</Gloss></h2>
-      <ol className="captions" aria-label="লাইভ ক্যাপশন">
-        {captions.map((line, index) => <li key={index}><strong>{line.speaker === 'CALLER' ? 'আপনি' : 'সহকারী'}:</strong> {line.text}</li>)}
-      </ol>
-      <button type="button" className="secondary-button" onClick={onKeyboard}>কীবোর্ডে চালিয়ে যান <Gloss>Continue with keyboard</Gloss></button>
-    </div>
-  )
-}
-
-function Readback({ call, busy, failed, onCorrect, onSubmit, promptRef }) {
-  const fields = activeFields(call).filter((field) => !consentScopes.includes(field))
-  return (
-    <div className="form-stack">
-      <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>যা বলেছেন, একবার শুনে নিন <Gloss>Check what you told us</Gloss></h2>
-      {call.mode === 'INTAKE' && call.answers.callerRole === 'REPRESENTATIVE' && <p className="safety-note">{say(copy.representative)}</p>}
-      {call.mode === 'INTAKE' && <p>{say(copy.identity)}</p>}
+    <>
+      {call.mode === 'INTAKE' && call.answers.callerRole === 'REPRESENTATIVE' && <p className="call-note">{copy.representative}</p>}
       <dl className="details readback">
-        {fields.map((field) => <div key={field}>
+        {activeFields(call).map((field) => <div key={field}>
           <dt>{steps[field].label}</dt>
-          <dd>{displayValue(call, field)} <button type="button" className="text-button" onClick={() => onCorrect(field)}>সংশোধন করুন <span className="visually-hidden">{steps[field].label}</span></button></dd>
+          <dd>
+            {displayValue(call, field)}
+            {recordings[field] && <audio controls preload="none" src={recordings[field]} aria-label={`আপনার কণ্ঠ: ${steps[field].label}`} />}
+            <button type="button" className="text-button" onClick={() => onCorrect(field)}>সংশোধন করুন <span className="visually-hidden">{steps[field].label}</span></button>
+          </dd>
         </div>)}
       </dl>
-      {failed && <p role="alert" className="error">{say(copy.failed)}</p>}
-      <button type="button" onClick={onSubmit} disabled={busy}>{busy ? 'জমা হচ্ছে…' : 'ঠিক আছে, জমা দিন'} <Gloss>Confirm and submit</Gloss></button>
-    </div>
+    </>
   )
 }
 
 export default function VoiceAccess() {
-  const [call, setCallState] = useState(null)
-  const [live, setLive] = useState('OFF') // OFF | CONNECTING | ON | FAILED
-  const [speaking, setSpeaking] = useState(false)
-  const [captions, setCaptions] = useState([])
+  const [call, setCall] = useState(null)
+  const [modeState, setModeState] = useState({ turn: 'IDLE', mode: 'PROMPT' })
+  const [attempt, setAttempt] = useState(0)
+  const [digitState, setDigitState] = useState({ turn: 'IDLE', value: '' })
+  const [voiceOff, setVoiceOff] = useState(false)
+  const [notice, setNotice] = useState(null)
+  const [micOpen, setMicOpen] = useState(false)
+  const [recordings, setRecordings] = useState({})
   const [submission, setSubmission] = useState({ status: 'IDLE' })
   const promptRef = useRef(null)
-  const callRef = useRef(null)
-  const sessionRef = useRef(null)
+  const streamRef = useRef(null)
+  const callRecorderRef = useRef(null)
+  const answerRef = useRef(null) // the spoken answer being recorded: { recorder, startedAt }
+  const playerRef = useRef(null)
+  const toneRef = useRef(null)
+  const timerRef = useRef(null)
+  const runRef = useRef(0) // bumps whenever the current question is abandoned, so late callbacks do nothing
+  const callIdRef = useRef(0)
+  const leadRef = useRef([]) // a short clip to play before repeating the question (no answer, wrong key)
+  const introsRef = useRef(null)
+  const missesRef = useRef({ field: null, count: 0 })
   const transcriptRef = useRef([])
-  const finishingRef = useRef(false)
   const field = call ? nextField(call) : undefined
-  const phase = phaseOf(call, field, live, speaking, submission.status)
-  const voiceActive = live === 'ON' || live === 'CONNECTING'
-  const turn = call ? `${call.mode}:${field ?? 'READBACK'}:${submission.status === 'DONE'}:${voiceActive}` : 'IDLE'
+  const kind = kindOf(field)
+  const done = submission.status === 'DONE'
+  const turn = call ? `${call.mode}:${field ?? 'READBACK'}:${done}:${attempt}` : 'IDLE'
+  // Mode and typed digits belong to the question they were set for, so a new question starts clean. Without voice
+  // understanding or a microphone, a spoken question opens straight into the typed answer.
+  const typingDefault = kind === 'SPOKEN' && (voiceOff || !micOpen)
+  const mode = modeState.turn === turn ? modeState.mode : typingDefault ? 'TYPING' : 'PROMPT' // PROMPT | WAITING | RECORDING | PROCESSING | TYPING
+  const setMode = (next) => setModeState({ turn, mode: next })
+  const digits = digitState.turn === turn ? digitState.value : ''
+  const editDigits = (update) => setDigitState({ turn, value: update(digits) })
 
-  // Keyboard route: each new question takes focus so a screen reader speaks it. Live voice takes focus once while
-  // connecting, then the assistant speaks; when voice ends or fails, focus returns to the pending question.
-  useEffect(() => { if (turn !== 'IDLE' && live !== 'ON') promptRef.current?.focus() }, [turn, live])
-  useEffect(() => () => sessionRef.current?.close(), [])
+  // Each question (or a repeat) takes focus for screen readers, plays its clip, then waits for the caller.
+  const askTurn = useEffectEvent(async () => {
+    clearTimeout(timerRef.current)
+    if (!call) return
+    const run = ++runRef.current
+    playerRef.current.stop()
+    promptRef.current?.focus()
+    if (missesRef.current.field !== field) missesRef.current = { field, count: 0 }
+    const intro = field && (call.mode === 'INTAKE' ? 'greeting' : 'urgentHandoff')
+    const intros = intro && !introsRef.current.has(intro) && (call.mode === 'CALLBACK' || field === 'urgent') ? [intro] : []
+    intros.forEach((clip) => introsRef.current.add(clip))
+    const clips = [...leadRef.current, ...intros, done ? 'submitted' : field ?? 'readback']
+    leadRef.current = []
+    const finished = lightMode() || await playerRef.current.play(clips)
+    if (finished && run === runRef.current && !done) listen()
+  })
+  useEffect(() => { askTurn() }, [turn])
 
-  // Live callbacks read the latest draft, so every change goes through the ref as well as state.
-  function setCall(next) {
-    callRef.current = next
-    setCallState(next)
-  }
+  const onKeyboard = useEffectEvent((event) => {
+    if (event.ctrlKey || event.altKey || event.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return
+    if (event.key === 'Backspace' && kind === 'DIGITS') {
+      event.preventDefault()
+      editDigits((value) => value.slice(0, -1))
+    } else if (KEYS.includes(event.key)) {
+      event.preventDefault()
+      pressKey(event.key)
+    }
+  })
+  useEffect(() => {
+    const listener = (event) => onKeyboard(event)
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [])
 
-  function endLive(status = 'OFF') {
-    sessionRef.current?.close()
-    sessionRef.current = null
-    setSpeaking(false)
-    setLive(status)
-  }
+  // Leaving the page hangs up: clips, tones, recorders, and the microphone all stop.
+  useEffect(() => () => {
+    runRef.current += 1
+    callIdRef.current += 1
+    clearTimeout(timerRef.current)
+    playerRef.current?.stop()
+    answerRef.current?.recorder.cancel()
+    callRecorderRef.current?.cancel()
+    closeMicrophone(streamRef.current)
+    toneRef.current?.close()
+  }, [])
 
-  async function submit(confirmation) {
-    setSubmission({ status: 'PROCESSING' })
+  // After the clip: choices and numbers wait for keys; a spoken answer records after a beep until #.
+  function listen() {
+    if (kind !== 'SPOKEN') {
+      setMode('WAITING')
+      if (kind !== 'READBACK') armNoInput()
+      return
+    }
+    if (voiceOff || !streamRef.current) return setMode('TYPING')
     try {
-      const result = await api('/api/voice/intakes', { method: 'POST', body: payload(callRef.current, { confirmation, transcript: transcriptRef.current }) })
-      setSubmission({ status: 'DONE', applicationId: result.applicationId })
-      return { ok: true, applicationId: result.applicationId }
+      answerRef.current = { recorder: startRecording(streamRef.current), startedAt: Date.now() }
     } catch {
-      setSubmission({ status: 'FAILED' })
-      return { ok: false, error: 'Submission failed and nothing was saved. Offer to try again or to continue by keyboard.' }
+      return setMode('TYPING')
+    }
+    playTone(toneRef.current, [1000], 200)
+    setMode('RECORDING')
+    timerRef.current = setTimeout(finishSpoken, steps[field].long ? 180000 : 20000)
+  }
+
+  function armNoInput() {
+    clearTimeout(timerRef.current)
+    if (missesRef.current.count >= MAX_MISSES) return
+    timerRef.current = setTimeout(() => { missesRef.current.count += 1; repeat('noInput') }, NO_INPUT_MS)
+  }
+
+  function cancelAnswer() {
+    clearTimeout(timerRef.current)
+    answerRef.current?.recorder.cancel()
+    answerRef.current = null
+  }
+
+  // Asks the same question again, optionally after a short clip ("no answer heard", "wrong key").
+  function repeat(lead) {
+    cancelAnswer()
+    leadRef.current = lead ? [lead] : []
+    setAttempt((value) => value + 1)
+  }
+
+  function choose(value) {
+    cancelAnswer()
+    setCall(answer(call, field, value))
+  }
+
+  function pressKey(key) {
+    if (!call || done || mode === 'PROCESSING' || submission.status === 'PROCESSING') return
+    playTone(toneRef.current, DTMF[key])
+    missesRef.current.count = 0
+    if (key === '*') return repeat()
+    if (mode === 'PROMPT') {
+      playerRef.current.stop() // a key cuts the clip short, like type-ahead on a phone line
+      listen()
+      if (kind === 'SPOKEN') return // for a spoken answer the key only skips to the beep
+    }
+    if (kind === 'READBACK') return key === '1' && submit()
+    if (kind === 'CHOICE') {
+      const option = steps[field].choices[Number(key) - 1]
+      return option ? choose(option[0]) : repeat('wrongKey')
+    }
+    if (kind === 'DIGITS') {
+      if (key === '#') return /^[0-9]{6,20}$/.test(digits) ? choose(digits) : repeat('noInput')
+      editDigits((value) => (value + key).slice(0, 20))
+      return armNoInput()
+    }
+    if (key === '#' && answerRef.current) finishSpoken()
+  }
+
+  // # ends a spoken answer: transcribe it, keep what validates, and move on; otherwise ask again.
+  async function finishSpoken() {
+    const current = answerRef.current
+    if (!current) return
+    answerRef.current = null
+    clearTimeout(timerRef.current)
+    const run = runRef.current
+    const heard = Date.now() - current.startedAt >= MIN_SPOKEN_MS
+    const clip = await current.recorder.stop()
+    if (run !== runRef.current) return
+    if (!heard) return repeat('noInput')
+    setMode('PROCESSING')
+    try {
+      const result = await api(`/api/voice/answers?fields=${activeFields(call).join(',')}`, { method: 'POST', audio: clip })
+      if (run !== runRef.current) return
+      if (result.text) transcriptRef.current = appendTranscript(transcriptRef.current, 'CALLER', result.text)
+      const { call: next, accepted } = applyExtraction(call, result.values)
+      if (accepted.length) {
+        const clipUrl = URL.createObjectURL(clip)
+        setRecordings((existing) => ({ ...existing, ...Object.fromEntries(accepted.map((item) => [item, clipUrl])) }))
+        setCall(result.sensitive ? { ...next, aiSensitive: true } : next)
+      }
+      if (nextField(next) === field) repeat('noInput')
+    } catch (failure) {
+      if (run !== runRef.current) return
+      if (failure.status !== 503) return repeat('noInput')
+      setVoiceOff(true)
+      setNotice(copy.voiceOff)
+      setMode('TYPING')
     }
   }
 
-  // Any failure (no key, token refused, microphone denied, socket drop, timeout) keeps the draft and falls back.
-  async function startLive() {
-    setLive('CONNECTING')
-    let stream
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
-      const { token, model } = await api('/api/voice/live-session', { method: 'POST', signal: AbortSignal.timeout(10000) })
-      sessionRef.current = await openLiveSession({
-        token, model, stream,
-        on: {
-          ready: () => {
-            setLive('ON')
-            sessionRef.current?.say(`[Session start] Greet the caller in one short Bangla sentence, then ask the next approved question. ${JSON.stringify(guidance(callRef.current))}`)
-          },
-          toolCall: async (functionCall) => {
-            const result = applyToolCall(callRef.current, functionCall)
-            setCall(result.call)
-            const response = result.submit ? await submit('VOICE') : result.response
-            if (result.submit && response.ok) finishingRef.current = true
-            sessionRef.current?.respond(functionCall.id, functionCall.name, response)
-          },
-          transcript: (speaker, text) => {
-            transcriptRef.current = appendTranscript(transcriptRef.current, speaker, text)
-            setCaptions(transcriptRef.current.slice(-4))
-          },
-          speaking: setSpeaking,
-          turnComplete: () => { if (finishingRef.current) endLive() },
-          ended: () => {
-            sessionRef.current = null
-            setSpeaking(false)
-            setLive(finishingRef.current ? 'OFF' : 'FAILED')
-          },
-        },
-      })
-    } catch {
-      stream?.getTracks().forEach((track) => track.stop())
-      endLive('FAILED')
-    }
+  function typeInstead() {
+    playerRef.current?.stop()
+    cancelAnswer()
+    setMode('TYPING')
   }
 
-  function record(value) {
-    const next = answer(call, field, value)
-    setCall(next)
-    const consentsDone = next.answers.LIVE_VOICE === 'GRANTED' && !consentScopes.includes(nextField(next))
-    if (next.wantsLive && live === 'OFF' && next.mode === 'INTAKE' && consentsDone) startLive()
-  }
-
-  function newCall() {
-    endLive()
-    setCall(null)
-    setSubmission({ status: 'IDLE' })
-    setCaptions([])
+  async function placeCall() {
+    const callId = ++callIdRef.current
+    toneRef.current?.close()
+    toneRef.current = new AudioContext()
+    playerRef.current = createClipPlayer()
+    introsRef.current = new Set()
+    setVoiceOff(false)
     transcriptRef.current = []
-    finishingRef.current = false
+    leadRef.current = []
+    setRecordings({})
+    setSubmission({ status: 'IDLE' })
+    setNotice(null)
+    setAttempt(0)
+    setCall(startCall())
+    try {
+      const stream = await openMicrophone()
+      if (callId !== callIdRef.current) return closeMicrophone(stream) // hung up while the permission prompt was open
+      streamRef.current = stream
+      callRecorderRef.current = startRecording(stream)
+      setMicOpen(true)
+    } catch {
+      setNotice(copy.micDenied)
+    }
   }
 
-  const representative = call?.mode === 'INTAKE' && call.answers.callerRole === 'REPRESENTATIVE'
-  const liveNotice = copy.live[live]
+  // Stops the clip, any answer, and the full-call recording; releases the microphone; returns the recorded call.
+  async function finishRecording() {
+    callIdRef.current += 1
+    runRef.current += 1
+    playerRef.current?.stop()
+    cancelAnswer()
+    const clip = await callRecorderRef.current?.stop()
+    closeMicrophone(streamRef.current)
+    streamRef.current = callRecorderRef.current = null
+    setMicOpen(false)
+    return clip
+  }
+
+  async function hangUp() {
+    if (!window.confirm(copy.hangUpConfirm)) return
+    await finishRecording()
+    setCall(null)
+  }
+
+  async function submit() {
+    setSubmission({ status: 'PROCESSING' })
+    let result
+    try {
+      result = await api('/api/voice/intakes', { method: 'POST', body: payload(call, { transcript: transcriptRef.current }) })
+    } catch {
+      return setSubmission({ status: 'FAILED' })
+    }
+    setSubmission({ status: 'DONE', applicationId: result.applicationId, lookupCode: result.lookupCode })
+    const clip = await finishRecording()
+    // The call audio joins the same record, proven by the one-time status code. A failed upload never undoes the application.
+    if (clip?.size) api(`/api/voice/intakes/${result.applicationId}/recording`, { method: 'POST', audio: clip, headers: { 'x-lookup-code': result.lookupCode } }).catch(() => {})
+  }
+
+  const hints = { '*': copy.repeatKey }
+  if (kind === 'CHOICE') steps[field].choices.forEach(([, label], index) => { hints[index + 1] = label })
+  if (kind === 'DIGITS' || mode === 'RECORDING') hints['#'] = copy.finishKey
+  if (kind === 'READBACK') hints[1] = copy.submitKey
   return (
-    <section className="voice-page" aria-labelledby="voice-title" lang="bn">
-      <p className="eyebrow" lang="en">Citizen access · simulation</p>
-      <h1 id="voice-title" lang="en">Call 16699 – Voice Access Prototype</h1>
-      <div className="notice-card">
-        <p><strong>{copy.disclosure[0]}</strong></p>
-        <p lang="en">{copy.disclosure[1]}</p>
-      </div>
-      <p className="voice-state" lang="en">Prototype state: {phase}</p>
+    <section className="call-page" aria-labelledby="voice-title" lang="bn">
+      <header className="call-head">
+        <h1 id="voice-title">লিগ্যাল এইড হেল্পলাইন <span translate="no">১৬৬৯৯</span></h1>
+        <p className="sim-badge">{copy.simulation}</p>
+      </header>
 
-      {!call && <div className="form-stack">
-        <button type="button" onClick={() => setCall({ ...startCall(), wantsLive: true })}>ভয়েসে কথা বলুন <Gloss>Talk by voice (live AI)</Gloss></button>
-        <button type="button" className="secondary-button" onClick={() => setCall(startCall())}>কীবোর্ডে উত্তর দিন <Gloss>Answer by keyboard (no AI)</Gloss></button>
-      </div>}
+      {!call
+        ? <button type="button" className="call-button" onClick={placeCall}><PhoneIcon />{copy.call}</button>
+        : <div className="call-card">
+          {!done && <div className="call-status">
+            {micOpen && <span className="call-rec"><span className="call-rec-dot" aria-hidden="true" />{copy.recording}</span>}
+            <CallTimer />
+          </div>}
+          <div role="status" className="call-notice">
+            {mode === 'RECORDING' && <p>{copy.listening}</p>}
+            {mode === 'PROCESSING' && <p>{copy.transcribing}</p>}
+            {submission.status === 'PROCESSING' && <p>{copy.submitting}</p>}
+            {notice && <p>{notice}</p>}
+            {call.mode === 'CALLBACK' && field && <p className="call-note">{copy.urgent}</p>}
+          </div>
 
-      {call && submission.status === 'DONE' && <div className="card voice-turn form-stack">
-        <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>আবেদন জমা হয়েছে: <span lang="en" translate="no">{submission.applicationId}</span> <Gloss>Application submitted</Gloss></h2>
-        <p>{say(copy.review)}</p>
-        {call.mode === 'CALLBACK' && <p>{say(copy.callback)}</p>}
-        {representative && <p className="safety-note">{say(copy.representative)}</p>}
-        {call.answers.AUDIO_STORAGE === 'DENIED' && <p>{say(copy.audioDenied)}</p>}
-        <button type="button" className="secondary-button" onClick={newCall}>নতুন কল <Gloss>New call</Gloss></button>
-      </div>}
+          {done
+            ? <div className="call-turn">
+              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>আবেদন জমা হয়েছে: <span lang="en" translate="no">{submission.applicationId}</span></h2>
+              <p>{call.mode === 'CALLBACK' ? copy.callback : copy.review}</p>
+              <p className="call-code">{copy.code}: <strong lang="en" translate="no">{submission.lookupCode}</strong></p>
+              <p className="muted">{copy.codeNote}</p>
+              <button type="button" className="secondary-button" onClick={() => setCall(null)}>{copy.newCall}</button>
+            </div>
+            : <div className="call-turn">
+              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{field ? steps[field].prompt : copy.readback}</h2>
+              {kind === 'DIGITS' && <div className="call-digits">
+                <output aria-label={steps[field].label}>{bnDigits(digits)}</output>
+                {digits && <button type="button" className="text-button" onClick={() => editDigits((value) => value.slice(0, -1))}>মুছুন</button>}
+              </div>}
+              {kind === 'READBACK' && <Readback call={call} recordings={recordings}
+                onCorrect={(item) => { setSubmission({ status: 'IDLE' }); setCall(correct(call, item)) }} />}
+              {submission.status === 'FAILED' && <p role="alert" className="error">{copy.failed}</p>}
+              {mode === 'TYPING' && kind === 'SPOKEN'
+                ? <TypedAnswer key={`${field}:${attempt}`} field={field} initial={call.previous[field]} onAnswer={choose} />
+                : <Keypad hints={hints} onPress={pressKey} />}
+              {kind === 'SPOKEN' && mode !== 'TYPING' && <button type="button" className="text-button" onClick={typeInstead}>{copy.typeInstead}</button>}
+            </div>}
 
-      {call && submission.status !== 'DONE' && <div className="card voice-turn">
-        <div role="status">
-          {liveNotice && <p className="safety-note">{say(liveNotice)}</p>}
-          {call.mode === 'CALLBACK' && field && <p className="safety-note">{say(copy.handoff[call.reason])}</p>}
-        </div>
-        {!field
-          ? <Readback call={call} busy={submission.status === 'PROCESSING'} failed={submission.status === 'FAILED'} promptRef={promptRef}
-            onSubmit={async () => { if ((await submit('BUTTON')).ok) endLive() }}
-            onCorrect={(item) => { endLive(); setSubmission({ status: 'IDLE' }); setCall(correct(call, item)) }} />
-          : voiceActive
-            ? <LiveTurn field={field} captions={captions} promptRef={promptRef} onKeyboard={() => endLive()} />
-            : steps[field].choices
-              ? <ChoiceTurn key={field} field={field} promptRef={promptRef} onAnswer={record} />
-              : <TextTurn key={field} field={field} initial={call.previous[field]} promptRef={promptRef} onAnswer={record} />}
-        {live === 'FAILED' && field && call.mode === 'INTAKE' && <button type="button" className="text-button" onClick={startLive}>আবার ভয়েস চেষ্টা করুন <Gloss>Try voice again</Gloss></button>}
-        {call.mode === 'INTAKE' && field && <button type="button" className="text-button human-button" onClick={() => { endLive(); setCall(requestHuman(call)) }}>মানুষের সাথে কথা বলতে চাই <Gloss>I want to talk to a person</Gloss></button>}
-      </div>}
+          {!done && <button type="button" className="hang-up" onClick={hangUp}>{copy.hangUp}</button>}
+        </div>}
     </section>
   )
 }

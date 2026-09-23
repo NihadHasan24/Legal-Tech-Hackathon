@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="DLAS">
+  <rect width="512" height="512" rx="76" fill="#f7f6f3"/>
+  <rect x="62" y="62" width="388" height="388" rx="48" fill="#222724"/>
+  <text x="256" y="291" fill="#ffffff" text-anchor="middle" font-family="Georgia, serif" font-size="118" font-weight="700">DLAS</text>
+  <path d="M134 354h244" stroke="#d4c494" stroke-width="14"/>
+</svg>

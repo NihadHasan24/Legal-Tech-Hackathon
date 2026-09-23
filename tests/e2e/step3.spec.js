@@ -12,7 +12,7 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   const submitted = page.getByText(/Application APP-\d{4}-\d{6} submitted to the DLAO queue/)
   await expect(submitted).toBeVisible()
   const applicationId = (await submitted.textContent()).match(/APP-\d{4}-\d{6}/)[0]
-  await expect(page.getByText('No records are available to this role in Step 3.')).toBeVisible()
+  await expect(page.getByText('No records are available to this role yet.')).toBeVisible()
 
   await page.getByRole('button', { name: 'Sign out' }).click()
   await signIn(page, 'DLAO_OFFICER')

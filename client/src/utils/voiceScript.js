@@ -1,13 +1,8 @@
-// Intake script: one approved question at a time. The keyboard route answers it directly; live voice
-// (liveVoice.js) answers it through validated tool calls. Both build the same payload the server re-validates.
-export const consentScopes = ['LIVE_VOICE', 'AUDIO_STORAGE', 'TRANSCRIPT_STORAGE']
-const consentChoices = [['GRANTED', 'হ্যাঁ, রাজি', 'Yes, I agree'], ['DENIED', 'না', 'No']]
+// Intake script: one approved question at a time, each played as a recorded clip like an IVR line. The caller
+// answers by voice (voiceAgent.js) or by choosing/typing; both build the same payload the server re-validates.
 const yesNo = [[true, 'হ্যাঁ', 'Yes'], [false, 'না', 'No']]
 
 export const steps = {
-  LIVE_VOICE: { prompt: 'আপনার সাথে এখন কথা বলতে আমরা কি লাইভ ভয়েস প্রসেসিং ব্যবহার করতে পারি? না বললে শুধু কলব্যাকের জন্য সামান্য তথ্য নেওয়া হবে।', en: 'May we use live voice processing to talk with you now? If you say no, we will take only minimal details for a callback.', choices: consentChoices },
-  AUDIO_STORAGE: { prompt: 'কথোপকথনের অডিও রেকর্ডিং কি সংরক্ষণ করতে পারি? না বললেও সেবা চলবে।', en: 'May we store an audio recording of this conversation? Saying no will not stop the service.', choices: consentChoices },
-  TRANSCRIPT_STORAGE: { prompt: 'কথোপকথনের লিখিত রূপ (ট্রান্সক্রিপ্ট) কি রাখতে পারি? না বললেও সেবা চলবে।', en: 'May we keep a written transcript? Saying no will not stop the service.', choices: consentChoices },
   urgent: { label: 'তাৎক্ষণিক বিপদ', prompt: 'এই মুহূর্তে কেউ কি তাৎক্ষণিক বিপদে আছেন?', en: 'Is anyone in immediate danger right now?', choices: yesNo },
   callerRole: { label: 'কার জন্য ফোন', prompt: 'আপনি কি নিজের জন্য ফোন করছেন, নাকি অন্য কারও পক্ষে?', en: 'Are you calling for yourself or for someone else?', choices: [['SELF', 'নিজের জন্য', 'For myself'], ['REPRESENTATIVE', 'অন্য কারও পক্ষে', 'For someone else']] },
   callerName: { label: 'আপনার নাম', prompt: 'আপনার নাম কী?', en: 'What is your name?', max: 120 },
@@ -26,17 +21,16 @@ export const steps = {
 const representative = (answers) => answers.callerRole === 'REPRESENTATIVE'
 const phone = (answers) => answers.contactChannel === 'PHONE'
 const flows = {
-  INTAKE: [['LIVE_VOICE'], ['AUDIO_STORAGE'], ['TRANSCRIPT_STORAGE'], ['urgent'], ['callerRole'], ['callerName', representative], ['relationship', representative],
+  INTAKE: [['urgent'], ['callerRole'], ['callerName', representative], ['relationship', representative],
     ['applicantName'], ['identityDocument'], ['problem'], ['district'], ['contactChannel'], ['contactValue', phone],
     ['contactOwner', (answers) => phone(answers) && representative(answers)], ['safeTime'], ['smsSafe', phone]],
-  // Minimal-data human callback: only what a person needs to follow up safely.
+  // Immediate danger: stop questioning and take only what a person needs to call back safely.
   CALLBACK: [['contactValue'], ['safeTime'], ['district'], ['urgent']],
 }
 
 export const startCall = () => ({ mode: 'INTAKE', reason: null, answers: {}, previous: {}, corrected: [], aiFields: [] })
 export const activeFields = (call) => flows[call.mode].filter(([, applies]) => !applies || applies(call.answers)).map(([field]) => field)
 export const nextField = (call) => activeFields(call).find((field) => call.answers[field] === undefined)
-export const requestHuman = (call, reason = 'CALLER_REQUESTED_HUMAN') => ({ ...call, mode: 'CALLBACK', reason })
 export const displayValue = (call, field) => steps[field].choices?.find(([value]) => value === call.answers[field])?.[1] ?? call.answers[field]
 
 // `via` keeps provenance honest: answers the live model extracted are listed in aiFields for the server to flag.
@@ -48,7 +42,6 @@ export function answer(call, field, value, via = 'CALLER') {
     corrected: changed ? [...new Set([...call.corrected, field])] : call.corrected,
     aiFields: via === 'AI' ? [...new Set([...call.aiFields, field])] : call.aiFields.filter((item) => item !== field),
   }
-  if (field === 'LIVE_VOICE' && value === 'DENIED') return { ...next, mode: 'CALLBACK', reason: 'LIVE_VOICE_REFUSED' }
   if (field === 'urgent' && value === true && call.mode === 'INTAKE') return { ...next, mode: 'CALLBACK', reason: 'URGENT_HANDOFF' }
   return next
 }
@@ -59,16 +52,17 @@ export function correct(call, field) {
 }
 
 export function payload(call, { confirmation = 'BUTTON', transcript = [] } = {}) {
-  const fields = activeFields(call).filter((field) => !consentScopes.includes(field))
+  const fields = activeFields(call)
   return {
     mode: call.mode,
     confirmation,
+    // The model may flag possible danger in the caller's words; only a human acts on it.
+    ...(call.aiSensitive ? { aiSensitive: true } : {}),
     ...(call.mode === 'CALLBACK' ? { callbackReason: call.reason } : {}),
-    consents: Object.fromEntries(consentScopes.filter((scope) => call.answers[scope]).map((scope) => [scope, call.answers[scope]])),
     answers: Object.fromEntries(fields.map((field) => [field, call.answers[field]])),
     correctedFields: call.corrected.filter((field) => fields.includes(field)),
     aiFields: call.aiFields.filter((field) => fields.includes(field)),
-    // A transcript leaves the browser only with explicit transcript consent; audio never does.
-    ...(call.answers.TRANSCRIPT_STORAGE === 'GRANTED' && transcript.length ? { transcript } : {}),
+    // The whole call is recorded under the greeting's notice, so its transcript is kept with it.
+    ...(transcript.length ? { transcript } : {}),
   }
 }

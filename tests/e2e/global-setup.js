@@ -15,7 +15,7 @@ export default async function globalSetup() {
     const username = `e2e.${role.toLowerCase()}`
     const password = randomBytes(24).toString('base64url')
     const user = await models.User.create({ username, displayName: `Fictional ${roleNames[role]}`, passwordHash: await hashPassword(password) })
-    await models.RoleAssignment.create({ userId: user._id, role, officeCode: 'DEMO' })
+    await models.RoleAssignment.create({ userId: user._id, role, officeCode: role === 'RECEIVING_DLAO' ? 'JHENAIDAH-DEMO' : 'DEMO' })
     actors[role] = { username, password }
   }
   process.env.E2E_ACTORS = JSON.stringify(actors)

@@ -1,20 +1,32 @@
 import { expect, test } from '@playwright/test'
 import { steps } from '../../client/src/utils/voiceScript.js'
 
-test('when live AI is unavailable, the voice route falls back to the keyboard without losing answers', async ({ page }) => {
+// The E2E server runs with VOICE_AI=off, so speaking an answer hits a real 503 from our own API.
+test('when voice understanding is unavailable, the caller keeps answering by keyboard', async ({ page }) => {
   await page.goto('/voice')
-  await page.getByRole('button', { name: 'ভয়েসে কথা বলুন', exact: true }).click()
-  for (const field of ['LIVE_VOICE', 'AUDIO_STORAGE', 'TRANSCRIPT_STORAGE']) {
-    await expect(page.getByRole('heading', { name: steps[field].prompt })).toBeFocused()
-    await page.getByRole('button', { name: field === 'AUDIO_STORAGE' ? 'না' : 'হ্যাঁ, রাজি', exact: true }).click()
-  }
-  const tokenRequest = page.waitForResponse('**/api/voice/live-session')
-  expect((await tokenRequest).status()).toBe(503)
-  await expect(page.getByText(/লাইভ ভয়েস এখন পাওয়া যাচ্ছে না/)).toBeVisible()
-  await expect(page.getByText('Prototype state: LISTENING')).toBeVisible()
-  // Focus returns to the pending question so a screen-reader user continues by keyboard.
+  await page.getByRole('button', { name: 'কল করুন', exact: true }).click()
   await expect(page.getByRole('heading', { name: steps.urgent.prompt })).toBeFocused()
-  await page.getByRole('button', { name: 'না', exact: true }).press('Enter')
+  await page.keyboard.press('2') // no one is in danger; choices never go through the AI
   await expect(page.getByRole('heading', { name: steps.callerRole.prompt })).toBeFocused()
-  await expect(page.getByRole('button', { name: 'আবার ভয়েস চেষ্টা করুন' })).toBeVisible()
+  await page.keyboard.press('1') // calling for myself
+  await expect(page.getByRole('heading', { name: steps.applicantName.prompt })).toBeFocused()
+
+  await page.keyboard.press('#') // skip the question clip; the beep starts the recording
+  await expect(page.getByText(/শুনছি/)).toBeVisible()
+  await page.waitForTimeout(1500) // record long enough for the fake microphone to produce real audio
+  const answered = page.waitForResponse('**/api/voice/answers**')
+  await page.keyboard.press('#')
+  expect((await answered).status()).toBe(503)
+  await expect(page.getByText(/ভয়েস বোঝার সেবা এখন পাওয়া যাচ্ছে না/)).toBeVisible()
+
+  // The draft survives and the same question continues as a typed answer.
+  const name = page.getByRole('textbox', { name: steps.applicantName.prompt })
+  await expect(name).toBeFocused()
+  await name.fill('Fictional Moyuri')
+  await page.getByRole('button', { name: 'উত্তর দিন', exact: true }).click()
+  await expect(page.getByRole('heading', { name: steps.identityDocument.prompt })).toBeFocused()
+  await page.keyboard.press('3')
+  // Once voice is known to be off, spoken questions open straight into the typed answer.
+  await expect(page.getByRole('textbox', { name: steps.problem.prompt })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'লিখে উত্তর দিন' })).toHaveCount(0)
 })

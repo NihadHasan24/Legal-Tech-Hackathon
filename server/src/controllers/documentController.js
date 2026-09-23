@@ -1,4 +1,5 @@
-import { addDocumentVersion, createDocumentMetadata, getDocument, listDocuments, listDocumentVersions } from '../services/applicationService.js'
+import { addDocumentVersion, createDocumentMetadata, getDocument, listDocuments, listDocumentVersions, listEvidenceAccess } from '../services/applicationService.js'
+import { approveBriefing, getBriefing, proposeBriefing } from '../services/documentAgentService.js'
 
 export async function readDocument(request, response) {
   response.json(await getDocument(request.params.documentId, request.auth))
@@ -6,6 +7,10 @@ export async function readDocument(request, response) {
 
 export async function readDocuments(request, response) {
   response.json(await listDocuments(request.params.applicationId, request.auth))
+}
+
+export async function readEvidenceAccess(request, response) {
+  response.json(await listEvidenceAccess(request.params.applicationId, request.auth))
 }
 
 export async function addDocument(request, response) {
@@ -18,4 +23,16 @@ export async function readVersions(request, response) {
 
 export async function addVersion(request, response) {
   response.status(201).json(await addDocumentVersion(request.params.documentId, request.body, request.auth))
+}
+
+export async function readBriefing(request, response) {
+  response.json(await getBriefing(request.params.applicationId, request.auth))
+}
+
+export async function generateBriefing(request, response) {
+  response.status(201).json(await proposeBriefing(request.params.applicationId, request.auth))
+}
+
+export async function approveDocumentBriefing(request, response) {
+  response.json(await approveBriefing(request.params.applicationId, request.body.reason, request.auth))
 }

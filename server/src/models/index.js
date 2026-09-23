@@ -38,12 +38,23 @@ const applicationSchema = new Schema({
   channel: { type: String, required: true, enum: ['WEB', 'HELPLINE_SIM', 'VOICE_SIM', 'UDC', 'DLAO'] },
   status: { type: String, enum: ['SUBMITTED', 'ACCEPTED'], default: 'SUBMITTED' },
   reviewState: { type: String, enum: ['PENDING_REVIEW', 'NEEDS_INFORMATION', 'READY_FOR_DECISION'], default: 'PENDING_REVIEW' },
+  priorityDecision: { type: String, enum: ['URGENT', 'ROUTINE'] },
+  lookupCodeHash: { type: String, select: false },
   caseId: String,
   version: { type: Number, default: 1 },
   auditSequence: { type: Number, default: 1 },
   submittedByUserId: ref('User'),
   acceptedByUserId: ref('User', false),
   acceptedAt: Date,
+  assistedByUserId: ref('User', false),
+  // Latest authorised human routing decision; a REFER route binds the next referral to that office.
+  routingDecision: {
+    route: { type: String, enum: ['RETAIN', 'REFER'] },
+    officeCode: String,
+    reason: String,
+    decidedByUserId: ref('User', false),
+    decidedAt: Date,
+  },
 }, { timestamps: true })
 applicationSchema.index({ caseId: 1 }, { unique: true, partialFilterExpression: { caseId: { $type: 'string' } } })
 applicationSchema.index({ demoSeedKey: 1 }, { unique: true, partialFilterExpression: { demoSeedKey: { $type: 'string' } } })
@@ -55,8 +66,26 @@ const caseSchema = new Schema({
   officeCode: { type: String, required: true },
   status: { type: String, enum: ['OPEN'], default: 'OPEN' },
   acceptedByUserId: ref('User'),
+  nextHearingAt: Date,
+  nextAction: String,
 }, { timestamps: true })
 export const Case = model('Case', caseSchema)
+
+const duplicateReviewSchema = new Schema({
+  applicationAId: recordId,
+  applicationBId: recordId,
+  score: { type: Number, required: true, min: 0, max: 100 },
+  matchingAttributes: [String],
+  differingAttributes: [String],
+  status: { type: String, enum: ['CONFIRMED_DUPLICATE', 'NOT_DUPLICATE'], required: true },
+  reviewedByUserId: ref('User'),
+  reviewedAt: { type: Date, required: true },
+  reviewReason: { type: String, required: true },
+}, { timestamps: true })
+duplicateReviewSchema.index({ applicationAId: 1, applicationBId: 1 }, { unique: true })
+duplicateReviewSchema.index({ applicationAId: 1, reviewedAt: -1 })
+duplicateReviewSchema.index({ applicationBId: 1, reviewedAt: -1 })
+export const DuplicateReview = model('DuplicateReview', duplicateReviewSchema)
 
 const factSchema = new Schema({
   applicationId: recordId,
@@ -89,6 +118,31 @@ export const Representation = model('Representation', new Schema({
   authorityStatus: { type: String, enum: ['PENDING', 'VERIFIED', 'REVOKED'], default: 'PENDING' },
   recordedByUserId: ref('User'),
 }, { timestamps: true }))
+
+export const AssistanceRecord = model('AssistanceRecord', new Schema({
+  applicationId: { type: String, required: true, unique: true },
+  applicantPersonId: ref('Person'),
+  helperPersonId: ref('Person'),
+  translatorPersonId: ref('Person'),
+  typistPersonId: ref('Person'),
+  helperPhone: String,
+  originalLanguage: { type: String, required: true },
+  caseType: { type: String, required: true, enum: ['FAMILY', 'LAND', 'LABOUR', 'CRIMINAL', 'OTHER'] },
+  originalConfirmed: { type: Boolean, default: false },
+  translationConfirmed: { type: Boolean, default: false },
+  recordedByUserId: ref('User'),
+}, { timestamps: true }))
+
+const clientMutationSchema = new Schema({
+  actorUserId: ref('User'),
+  clientMutationId: { type: String, required: true },
+  temporaryId: { type: String, required: true },
+  payloadHash: { type: String, required: true },
+  applicationId: recordId,
+  result: { type: Schema.Types.Mixed, required: true },
+}, { timestamps: true })
+clientMutationSchema.index({ actorUserId: 1, clientMutationId: 1 }, { unique: true })
+export const ClientMutation = model('ClientMutation', clientMutationSchema)
 
 const consentSchema = new Schema({
   applicationId: recordId,
@@ -124,7 +178,7 @@ export const SafeContactProfile = model('SafeContactProfile', safeContactSchema)
 export const Task = model('Task', new Schema({
   applicationId: recordId,
   caseId: String,
-  kind: { type: String, required: true, enum: ['INTAKE_REVIEW', 'DECISION', 'FOLLOW_UP', 'MANUAL'] },
+  kind: { type: String, required: true, enum: ['INTAKE_REVIEW', 'DECISION', 'FOLLOW_UP', 'MANUAL', 'REFERRAL', 'ROUTING_DECISION', 'LAWYER_UPDATE', 'LAWYER_PATTERN_REVIEW', 'LAWYER_CHANGE_REVIEW'] },
   title: { type: String, required: true },
   status: { type: String, enum: ['OPEN', 'DONE'], default: 'OPEN' },
   ownerRole: { type: String, required: true, enum: roles },
@@ -168,13 +222,23 @@ export const VoiceTranscript = model('VoiceTranscript', new Schema({
   applicationId: { type: String, required: true, unique: true },
   turns: [{ _id: false, speaker: { type: String, enum: ['CALLER', 'ASSISTANT'], required: true }, text: { type: String, required: true, maxlength: 2000 } }],
   transcribedBy: { type: String, required: true },
-  consentId: ref('ConsentRecord'),
+}, { timestamps: { createdAt: true, updatedAt: false } }))
+
+// The full 16699 call audio, kept under the greeting's recording notice; officer-only (see getCallRecording).
+// ponytail: stored inline (8 MB upload cap, under MongoDB's 16 MB document limit); move to GridFS or object storage for longer calls.
+export const CallRecording = model('CallRecording', new Schema({
+  applicationId: { type: String, required: true, unique: true },
+  mimeType: { type: String, required: true },
+  bytes: { type: Number, required: true },
+  sha256: { type: String, required: true },
+  audio: { type: Buffer, required: true, select: false },
 }, { timestamps: { createdAt: true, updatedAt: false } }))
 
 export const Document = model('Document', new Schema({
   applicationId: recordId,
   caseId: String,
   label: { type: String, required: true },
+  checklistItem: String,
   sensitivity: { type: String, enum: ['STANDARD', 'RESTRICTED'], default: 'STANDARD' },
   accessState: { type: String, enum: ['PENDING_POLICY', 'EXPLICIT_GRANT'], default: 'PENDING_POLICY' },
   allowedUserIds: [ref('User', false)],
@@ -187,19 +251,285 @@ const documentVersionSchema = new Schema({
   documentId: ref('Document'),
   version: { type: Number, required: true },
   label: { type: String, required: true },
+  filename: String,
   qualityState: { type: String, enum: ['PENDING_REVIEW', 'READABLE', 'UNREADABLE'], default: 'PENDING_REVIEW' },
   note: String,
+  textContent: { type: String, maxlength: 50000, select: false },
+  contentHash: String,
   recordedByUserId: ref('User'),
 }, { timestamps: { createdAt: true, updatedAt: false } })
 documentVersionSchema.index({ documentId: 1, version: 1 }, { unique: true })
 export const DocumentVersion = model('DocumentVersion', documentVersionSchema)
 
-export const LawyerAssignment = model('LawyerAssignment', new Schema({
+export const DocumentBriefing = model('DocumentBriefing', new Schema({
+  applicationId: { type: String, required: true, unique: true },
+  sourceVersion: { type: Number, required: true },
+  caseType: { type: String, required: true },
+  status: { type: String, enum: ['PROPOSED', 'APPROVED'], default: 'PROPOSED' },
+  model: { type: String, required: true },
+  summary: { type: String, required: true },
+  citations: [{ _id: false, documentVersionId: ref('DocumentVersion'), label: String, line: Number, excerpt: String }],
+  missing: [String],
+  unreadable: [String],
+  approvedByUserId: ref('User', false),
+  approvedAt: Date,
+}, { timestamps: true }))
+
+const triageComponentSchema = new Schema({
+  name: { type: String, enum: ['CASE_CATEGORIZER', 'PROCESS_SAFETY', 'URGENCY_ROUTING'], required: true },
+  recommendation: { type: String, required: true, maxlength: 80 },
+  urgencySignal: { type: String, enum: ['HIGH', 'LOW', 'UNKNOWN'], required: true },
+  reasons: [{ type: String, maxlength: 240 }],
+  evidenceRefs: [{ type: String, maxlength: 80 }],
+  uncertainty: { type: String, required: true, maxlength: 240 },
+  requiresHumanReview: { type: Boolean, enum: [true], required: true },
+}, { _id: false })
+const triageDisagreementSchema = new Schema({
+  dimension: { type: String, enum: ['URGENCY'], required: true },
+  components: [{ type: String, enum: ['PROCESS_SAFETY', 'URGENCY_ROUTING'] }],
+  signals: [{ type: String, enum: ['HIGH', 'LOW'] }],
+  summary: { type: String, required: true, maxlength: 300 },
+}, { _id: false })
+const humanTriageDecisionSchema = new Schema({
+  category: { type: String, enum: ['LABOUR', 'FAMILY', 'LAND', 'CRIMINAL', 'OTHER', 'UNCERTAIN'], required: true },
+  disposition: { type: String, enum: ['PRIORITIZE_FOR_HUMAN_REVIEW', 'CONTINUE_ROUTINE_REVIEW', 'SEEK_MORE_INFORMATION', 'REQUEST_JURISDICTION_REVIEW', 'NO_CHANGE'], required: true },
+  reason: { type: String, required: true, maxlength: 1000 },
+  decidedByUserId: ref('User'),
+  decidedAt: { type: Date, required: true },
+}, { _id: false })
+const triageAssessmentSchema = new Schema({
+  applicationId: recordId,
+  sourceVersion: { type: Number, required: true },
+  model: { type: String, required: true },
+  aiAssisted: { type: Boolean, required: true },
+  components: { type: [triageComponentSchema], required: true },
+  disagreements: [triageDisagreementSchema],
+  status: { type: String, enum: ['PENDING_HUMAN_REVIEW', 'REVIEWED'], default: 'PENDING_HUMAN_REVIEW' },
+  humanDecision: humanTriageDecisionSchema,
+  createdByUserId: ref('User'),
+}, { timestamps: true })
+triageAssessmentSchema.index({ applicationId: 1, createdAt: -1 })
+export const TriageAssessment = model('TriageAssessment', triageAssessmentSchema)
+
+const settlementSectionSchema = new Schema({
+  key: { type: String, required: true, maxlength: 60 },
+  label: { type: String, required: true, maxlength: 80 },
+  text: { type: String, required: true, maxlength: 500 },
+  aiFilled: { type: Boolean, required: true },
+}, { _id: false })
+const settlementDraftSchema = new Schema({
+  applicationId: recordId,
+  caseId: { type: String, required: true },
+  mediationId: ref('Mediation'),
+  template: { type: String, required: true, enum: ['MAINTENANCE', 'PROPERTY', 'LABOUR'] },
+  version: { type: Number, required: true, default: 1 },
+  model: { type: String, required: true },
+  aiAssisted: { type: Boolean, required: true },
+  sourceNotesDigest: { type: String, required: true },
+  sections: { type: [settlementSectionSchema], required: true },
+  inconsistencies: [{ type: String, maxlength: 300 }],
+  status: { type: String, enum: ['HUMAN_REVIEW', 'APPROVED'], default: 'HUMAN_REVIEW' },
+  reviewReason: { type: String, maxlength: 1000 },
+  reviewedByUserId: ref('User', false),
+  reviewedAt: Date,
+  partyAcknowledgements: {
+    partyAUnderstands: Boolean,
+    partyAConsents: Boolean,
+    partyBUnderstands: Boolean,
+    partyBConsents: Boolean,
+  },
+}, { timestamps: true })
+settlementDraftSchema.index({ mediationId: 1 }, { unique: true })
+export const SettlementDraft = model('SettlementDraft', settlementDraftSchema)
+
+const mediationNoticeSchema = new Schema({
+  party: { type: String, required: true, enum: ['PARTY_A', 'PARTY_B'] },
+  deliveryState: { type: String, required: true, enum: ['DELIVERED', 'NOT_DELIVERED'] },
+  reason: { type: String, required: true, maxlength: 300 },
+  recordedByUserId: ref('User'),
+  recordedAt: { type: Date, required: true },
+}, { _id: false })
+const mediationSchema = new Schema({
+  applicationId: { type: String, required: true },
+  caseId: { type: String, required: true },
+  officeCode: { type: String, required: true },
+  mediatorUserId: ref('User', false),
+  stage: { type: String, required: true, enum: ['REGISTRATION', 'SCHEDULING_NOTICES', 'DOCUMENT_REVIEW', 'ATTENDANCE', 'MEDIATION', 'DRAFT_OUTCOME', 'SIGNATURES', 'PENDING_CLAO_CERTIFICATION', 'CERTIFIED_FINAL'], default: 'REGISTRATION' },
+  mode: { type: String, enum: ['IN_PERSON', 'REMOTE', 'HYBRID'] },
+  scheduledAt: Date,
+  venue: { type: String, maxlength: 200 },
+  inPersonFallback: { type: String, maxlength: 300 },
+  notices: [mediationNoticeSchema],
+  documentsReviewedAt: Date,
+  documentReviewReason: { type: String, maxlength: 500 },
+  attendance: {
+    partyA: { type: String, enum: ['ATTENDED', 'REPRESENTED', 'ABSENT'] },
+    partyB: { type: String, enum: ['ATTENDED', 'REPRESENTED', 'ABSENT'] },
+    reason: { type: String, maxlength: 500 },
+    recordedByUserId: ref('User', false),
+    recordedAt: Date,
+  },
+  outcome: { type: String, enum: ['AGREEMENT_REACHED', 'NO_AGREEMENT', 'CONTINUED'] },
+  outcomeReason: { type: String, maxlength: 1000 },
+  settlementDraftId: ref('SettlementDraft', false),
+  legalApplicability: { type: String, enum: ['UNVERIFIED', 'APPLICABLE_VERIFIED'], default: 'UNVERIFIED' },
+  legalReviewBasis: { type: String, maxlength: 500 },
+  legalReviewedByUserId: ref('User', false),
+  legalReviewedAt: Date,
+  legalEffectState: { type: String, required: true, enum: ['LEGAL_EFFECT_REQUIRES_AUTHORISED_REVIEW', 'PENDING_CLAO_CERTIFICATION', 'CERTIFIED_FINAL'], default: 'LEGAL_EFFECT_REQUIRES_AUTHORISED_REVIEW' },
+  certificateReason: { type: String, maxlength: 500 },
+  certifiedByUserId: ref('User', false),
+  certifiedAt: Date,
+  createdByUserId: ref('User'),
+}, { timestamps: true })
+mediationSchema.index({ officeCode: 1, mediatorUserId: 1, stage: 1, updatedAt: -1 })
+mediationSchema.index({ caseId: 1 }, { unique: true })
+mediationSchema.index({ applicationId: 1 }, { unique: true })
+export const Mediation = model('Mediation', mediationSchema)
+
+const signatureRecordSchema = new Schema({
+  applicationId: recordId,
+  caseId: { type: String, required: true },
+  mediationId: ref('Mediation'),
+  draftId: ref('SettlementDraft'),
+  draftVersion: { type: Number, required: true },
+  signerRole: { type: String, required: true, enum: ['PARTY_A', 'PARTY_B', 'MEDIATOR'] },
+  documentHash: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
+  publicKeyJwk: { type: Schema.Types.Mixed, required: true },
+  signature: { type: String, required: true },
+  clientMutationId: { type: String, required: true, unique: true },
+  clientSignedAt: { type: Date, required: true },
+  recordedByUserId: ref('User'),
+  receivedAt: { type: Date, required: true },
+}, { timestamps: { createdAt: true, updatedAt: false } })
+signatureRecordSchema.index({ draftId: 1, draftVersion: 1, signerRole: 1 }, { unique: true })
+signatureRecordSchema.index({ applicationId: 1, receivedAt: 1 })
+export const SignatureRecord = model('SignatureRecord', signatureRecordSchema)
+
+const relatedIncidentGroupSchema = new Schema({
+  title: { type: String, required: true, maxlength: 120 },
+  officeCode: { type: String, required: true },
+  applicationIds: [{ type: String, required: true }],
+  commonDocumentIds: [ref('Document', false)],
+  createdByUserId: ref('User'),
+}, { timestamps: true })
+relatedIncidentGroupSchema.index({ applicationIds: 1 })
+export const RelatedIncidentGroup = model('RelatedIncidentGroup', relatedIncidentGroupSchema)
+
+const referralSchema = new Schema({
+  applicationId: recordId,
+  caseId: { type: String, required: true },
+  sendingOfficeCode: { type: String, required: true },
+  receivingOfficeCode: { type: String, required: true },
+  sentByUserId: ref('User'),
+  responsibleUserId: ref('User'),
+  reason: { type: String, required: true },
+  history: { type: String, required: true },
+  expectedAction: { type: String, required: true },
+  dueAt: { type: Date, required: true },
+  documentIds: [ref('Document', false)],
+  // Restricted evidence travels only when the sender holds a grant and records why sharing is necessary.
+  sensitiveDocumentIds: [ref('Document', false)],
+  sensitiveAccessReason: String,
+  status: { type: String, enum: ['SENT', 'ACKNOWLEDGED', 'ACCEPTED', 'RETURNED'], default: 'SENT' },
+  acknowledgedAt: Date,
+  respondedAt: Date,
+  responseReason: String,
+  respondedByUserId: ref('User', false),
+  overdueAt: Date,
+  taskId: ref('Task'),
+}, { timestamps: true })
+referralSchema.index({ receivingOfficeCode: 1, createdAt: -1 })
+referralSchema.index({ status: 1, dueAt: 1 })
+export const Referral = model('Referral', referralSchema)
+
+// Append-only read log for restricted evidence, kept apart from the audit chain so reads never bump record versions.
+export const EvidenceAccessLog = model('EvidenceAccessLog', new Schema({
+  applicationId: recordId,
+  documentId: ref('Document'),
+  userId: ref('User'),
+  roles: [{ type: String, enum: roles }],
+  outcome: { type: String, required: true, enum: ['GRANTED', 'DENIED'] },
+  basis: { type: String, required: true, enum: ['EXPLICIT_GRANT', 'REFERRAL', 'NONE'] },
+  referralId: ref('Referral', false),
+}, { timestamps: { createdAt: true, updatedAt: false } }))
+
+const lawyerAssignmentSchema = new Schema({
   applicationId: recordId,
   caseId: { type: String, required: true, index: true },
+  officeCode: String,
   lawyerUserId: ref('User'),
   active: { type: Boolean, default: true },
-}, { timestamps: true }))
+  status: { type: String, enum: ['PENDING', 'ACCEPTED', 'DECLINED', 'REASSIGNED'], default: 'ACCEPTED' },
+  assignedByUserId: ref('User', false),
+  changeRequestId: ref('LawyerChangeRequest', false),
+  acceptedAt: Date,
+  declinedAt: Date,
+  declineReason: String,
+}, { timestamps: true })
+lawyerAssignmentSchema.index({ lawyerUserId: 1, active: 1, status: 1 })
+lawyerAssignmentSchema.index({ applicationId: 1, active: 1, status: 1 })
+export const LawyerAssignment = model('LawyerAssignment', lawyerAssignmentSchema)
+
+const lawyerUpdateSchema = new Schema({
+  applicationId: recordId,
+  caseId: { type: String, required: true },
+  assignmentId: ref('LawyerAssignment'),
+  sequence: { type: Number, required: true },
+  dueAt: { type: Date, required: true },
+  instruction: { type: String, required: true },
+  status: { type: String, enum: ['PENDING', 'MISSED', 'SUBMITTED_ON_TIME', 'SUBMITTED_LATE', 'CANCELLED'], default: 'PENDING' },
+  missedAt: Date,
+  submittedAt: Date,
+  report: String,
+  nextAction: String,
+  recordedByUserId: ref('User', false),
+}, { timestamps: true })
+lawyerUpdateSchema.index({ assignmentId:  1, sequence: 1 }, { unique: true })
+lawyerUpdateSchema.index({ applicationId: 1, status: 1, dueAt: 1 })
+export const LawyerUpdate = model('LawyerUpdate', lawyerUpdateSchema)
+
+const lawyerChangeRequestSchema = new Schema({
+  applicationId: recordId,
+  caseId: { type: String, required: true },
+  channel: { type: String, required: true, enum: ['PHONE', 'IN_PERSON'] },
+  reason: { type: String, required: true },
+  status: { type: String, enum: ['OPEN', 'APPROVED', 'DECLINED', 'COMPLETED'], default: 'OPEN' },
+  recordedByUserId: ref('User'),
+  reviewedByUserId: ref('User', false),
+  reviewedAt: Date,
+  reviewReason: String,
+}, { timestamps: true })
+lawyerChangeRequestSchema.index({ applicationId: 1, status: 1 })
+export const LawyerChangeRequest = model('LawyerChangeRequest', lawyerChangeRequestSchema)
+
+const panelLawyerHoldSchema = new Schema({
+  lawyerUserId: { ...ref('User'), unique: true },
+  officeCode: { type: String, required: true },
+  newAssignmentHold: { type: Boolean, default: true },
+  reviewState: { type: String, enum: ['PENDING_REVIEW', 'CONTINUED', 'LIFTED'], default: 'PENDING_REVIEW' },
+  reviewerRole: { type: String, enum: ['DLAO_OFFICER'], default: 'DLAO_OFFICER' },
+  triggerApplicationId: recordId,
+  triggerAssignmentId: ref('LawyerAssignment'),
+  missedUpdateIds: [ref('LawyerUpdate', false)],
+  triggeredAt: { type: Date, required: true },
+  reviewedByUserId: ref('User', false),
+  reviewedAt: Date,
+  reviewReason: String,
+}, { timestamps: true })
+export const PanelLawyerHold = model('PanelLawyerHold', panelLawyerHoldSchema)
+
+const lawyerPaymentEventSchema = new Schema({
+  applicationId: recordId,
+  caseId: { type: String, required: true },
+  assignmentId: ref('LawyerAssignment'),
+  stage: { type: String, required: true, enum: ['CASE_PREPARATION', 'HEARING_ATTENDANCE', 'CLAIM_REVIEW', 'RECONCILIATION'] },
+  status: { type: String, required: true, enum: ['NOT_RECORDED', 'SUBMITTED', 'UNDER_REVIEW', 'RECONCILED', 'PAYMENT_RECORDED', 'DISPUTED'] },
+  reason: { type: String, required: true },
+  recordedByUserId: ref('User'),
+}, { timestamps: { createdAt: true, updatedAt: false } })
+lawyerPaymentEventSchema.index({ assignmentId: 1, createdAt: -1 })
+export const LawyerPaymentEvent = model('LawyerPaymentEvent', lawyerPaymentEventSchema)
 
 export const DemoSession = model('DemoSession', new Schema({
   tokenHash: { type: String, required: true, unique: true },

@@ -1,4 +1,4 @@
-export async function api(path, { token, body, signal, method = 'GET' } = {}) {
+export async function api(path, { token, body, audio, headers, signal, method = 'GET' } = {}) {
   const response = await fetch(path, {
     method,
     signal,
@@ -6,8 +6,10 @@ export async function api(path, { token, body, signal, method = 'GET' } = {}) {
     headers: {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(body ? { 'content-type': 'application/json' } : {}),
+      ...(audio ? { 'content-type': audio.type } : {}),
+      ...headers,
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: audio ?? (body ? JSON.stringify(body) : undefined),
   })
   if (response.status === 204) return null
   const data = await response.json()
@@ -15,6 +17,7 @@ export async function api(path, { token, body, signal, method = 'GET' } = {}) {
     const error = new Error(data.error?.message || 'The request failed. Please try again.')
     error.status = response.status
     error.code = data.error?.code
+    error.data = data
     throw error
   }
   return data

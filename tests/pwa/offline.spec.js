@@ -1,0 +1,41 @@
+import { expect, test } from '@playwright/test'
+
+test('built PWA installs a static-only worker, loads the shell offline, and measures light mode on a throttled connection', async ({ page, request, browser, baseURL }) => {
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'One record, every handover.' })).toBeVisible()
+  const manifest = await (await request.get('/manifest.webmanifest')).json()
+  expect(manifest.display).toBe('standalone')
+  expect(manifest.icons.map(({ sizes }) => sizes)).toEqual(['192x192', '512x512'])
+  await page.evaluate(() => navigator.serviceWorker.ready)
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller))
+  const installability = await (await page.context().newCDPSession(page)).send('Page.getInstallabilityErrors')
+  expect(installability.installabilityErrors).toEqual([])
+  const cached = await page.evaluate(async () => (await Promise.all((await caches.keys()).map(async (name) => (await (await caches.open(name)).keys()).map((item) => new URL(item.url).pathname)))).flat())
+  expect(cached.some((path) => path.startsWith('/assets/'))).toBeTruthy()
+  expect(cached.some((path) => path.startsWith('/api/'))).toBeFalsy()
+
+  await page.context().setOffline(true)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'One record, every handover.' })).toBeVisible()
+  await page.getByRole('button', { name: 'Light mode' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-light-mode', 'on')
+  await page.context().setOffline(false)
+
+  for (const light of [false, true]) {
+    const cold = await browser.newContext({ baseURL, serviceWorkers: 'block' })
+    await cold.addInitScript((value) => localStorage.setItem('dlas-light-mode', value ? '1' : '0'), light)
+    const coldPage = await cold.newPage()
+    const cdp = await cold.newCDPSession(coldPage)
+    await cdp.send('Network.enable')
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 50000, uploadThroughput: 50000 })
+    await coldPage.goto('/')
+    await expect(coldPage.getByRole('heading', { name: 'One record, every handover.' })).toBeVisible()
+    await expect(coldPage.locator('html')).toHaveAttribute('data-light-mode', light ? 'on' : 'off')
+    const loadMs = await coldPage.evaluate(() => performance.getEntriesByType('navigation')[0].duration)
+    const start = Date.now()
+    await coldPage.getByRole('button', { name: light ? 'Normal mode' : 'Light mode' }).click()
+    await expect(coldPage.locator('html')).toHaveAttribute('data-light-mode', light ? 'off' : 'on')
+    console.log(`${light ? 'Light' : 'Normal'} mode at 150 ms / 50 KB/s: cold shell ${Math.round(loadMs)} ms, mode interaction ${Date.now() - start} ms.`)
+    await cold.close()
+  }
+})

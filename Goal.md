@@ -116,7 +116,9 @@ Proceed to Step N+1?
 
 # 2. CREDENTIAL GATE - VERY IMPORTANT
 
-> **Provider decision (user instruction, 2026-09-22):** the live AI provider is **Google Gemini (Gemini Developer API)**, not OpenAI. The user supplied `GEMINI_API_KEY` for Step 5 and chose `gemini-3.8-live` for voice (verified available to the key). Wherever this file says OpenAI, `OPENAI_API_KEY`, GPT, or OpenAI Realtime, read: the approved provider, `GEMINI_API_KEY`, Gemini, and the Gemini Live API. Every other rule is unchanged: key server-side only, short-lived browser credentials, model names in environment configuration, strict tool validation, safe fallback, and human authority.
+> **Approach decision (user instruction, 2026-09-23):** Google denied API access to this account for every project tried, so the live speech-to-speech design is replaced by an **IVR-style pipeline on Groq's free tier**: pre-recorded human Bangla prompts play the approved questions, the caller answers by voice or keypad, **Whisper Large v3** transcribes the answer, and **GPT-OSS 120B** extracts structured answers through the same validated tool boundary. There is no text-to-speech: prompts are recorded by people, and the read-back replays the caller's own recording. This is turn-by-turn, not real-time barge-in. `GEMINI_*` is replaced by `GROQ_API_KEY`, `GROQ_STT_MODEL`, `GROQ_TEXT_MODEL`. Every other rule stands: key server-side only, strict schema validation, server validation before any write, safe fallback, human authority.
+>
+> **Superseded provider decision (2026-09-22):** the live AI provider is **Google Gemini (Gemini Developer API)**, not OpenAI. The user supplied `GEMINI_API_KEY` for Step 5 and chose `gemini-3.8-live` for voice (verified available to the key). Wherever this file says OpenAI, `OPENAI_API_KEY`, GPT, or OpenAI Realtime, read: the approved provider, `GEMINI_API_KEY`, Gemini, and the Gemini Live API. Every other rule is unchanged: key server-side only, short-lived browser credentials, model names in environment configuration, strict tool validation, safe fallback, and human authority.
 
 ## 2.1 Step 1 does NOT need a GPT/OpenAI API key
 
@@ -930,6 +932,8 @@ STOP.
 
 ## STEP 4 - Moyuri + Ripon + 16699 Voice Prototype in Deterministic/Mock Mode
 
+> Changed by user decision (2026-09-23; see `Project.md` Section 7.5): every call is recorded after a spoken greeting notice, with no consent questions (items 13, and the refusal test) and no caller-initiated human-callback button. Immediate danger still switches to the minimal-data human callback (item 12). The disclosure (item 2) is kept as a short on-screen badge.
+
 ### Objective
 Build the entire safe intake workflow before connecting a live GPT voice model.
 
@@ -985,7 +989,7 @@ STOP.
 
 ## STEP 5 - Live OpenAI GPT + Realtime Voice Integration
 
-> Provider changed by user decision (see Section 2): implemented with the Gemini Live API (`GEMINI_API_KEY`, `GEMINI_LIVE_MODEL`).
+> Provider and approach changed by user decision (see Section 2): implemented as a Groq IVR-style pipeline (recorded Bangla prompts + Whisper transcription + structured extraction), not live speech-to-speech.
 
 ### Objective
 Replace the deterministic AI portions of Step 4 with a controlled live OpenAI integration while preserving the exact same domain workflow and guardrails.

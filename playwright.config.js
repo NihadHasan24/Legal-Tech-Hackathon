@@ -22,7 +22,8 @@ export default defineConfig({
       command: 'npm run start --workspace server',
       url: 'http://127.0.0.1:5001/health',
       // Live AI stays off in browser tests: no paid calls, and the fallback path is what gets exercised.
-      env: { PORT: '5001', MONGODB_DB: databaseName, VOICE_AI: 'off' },
+      // Voice AI stays off in browser tests unless the opt-in spoken-Bangla test is running.
+      env: { PORT: '5001', MONGODB_DB: databaseName, VOICE_AI: process.env.LIVE_VOICE_SAMPLE ? 'on' : 'off', DOCUMENT_AI: 'off', TRIAGE_AI: 'off', SETTLEMENT_AI: 'off', REFERRAL_SWEEP_MS: '1000' },
       reuseExistingServer: false,
       timeout: 30000,
     },

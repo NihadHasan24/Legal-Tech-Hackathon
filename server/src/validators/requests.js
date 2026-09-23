@@ -54,6 +54,23 @@ export function validateReviewOverride(request, _response, next) {
   next()
 }
 
+export function validatePriorityOverride(request, _response, next) {
+  const value = body(request, ['priorityDecision', 'reason'])
+  if (!['URGENT', 'ROUTINE'].includes(value.priorityDecision)) fail('Priority decision is invalid.')
+  value.reason = text(value.reason, 'Human override reason', 10, 1000)
+  next()
+}
+
+export function validateStatusLookup(request, _response, next) {
+  const value = body(request, ['identifier', 'lookupCode', 'callerVerified', 'contactChannel'], ['identifier', 'lookupCode', 'callerVerified'])
+  if (!/^((APP|CASE)-\d{4}-\d{6})$/.test(value.identifier)) fail('A valid Application or Case ID is required.')
+  if (typeof value.lookupCode !== 'string' || !/^[a-f0-9]{24}$/.test(value.lookupCode)) fail('A valid lookup code is required.')
+  if (value.callerVerified !== true) fail('Human caller-verification attestation is required.')
+  value.contactChannel ??= 'PHONE'
+  if (!['PHONE', 'IN_PERSON'].includes(value.contactChannel)) fail('Status channel is invalid.')
+  next()
+}
+
 export function validateSearch(request, _response, next) {
   if (Object.keys(request.query).some((key) => key !== 'identifier')) fail('Unexpected search parameter.')
   if (!/^((APP|CASE)-\d{4}-\d{6})$/.test(request.query.identifier || '')) fail('A valid Application or Case ID is required.')
@@ -85,10 +102,67 @@ export function validateContactAttempt(request, _response, next) {
 }
 
 export function validateDocument(request, _response, next) {
-  const value = body(request, ['label', 'qualityState', 'note'], ['label', 'qualityState'])
+  const value = body(request, ['label', 'qualityState', 'note', 'filename', 'textContent', 'checklistItem', 'sensitivity'], ['label', 'qualityState'])
   value.label = text(value.label, 'Document label', 3, 160)
   if (!['PENDING_REVIEW', 'READABLE', 'UNREADABLE'].includes(value.qualityState)) fail('Document quality state is invalid.')
   if (value.note !== undefined) value.note = text(value.note, 'Document note', 3, 500)
+  if ((value.filename === undefined) !== (value.textContent === undefined)) fail('Text upload needs both filename and content.')
+  if (value.filename !== undefined) {
+    value.filename = text(value.filename, 'Filename', 5, 160)
+    if (!/^[\w .()-]+\.txt$/i.test(value.filename)) fail('Only fictional .txt uploads are supported.')
+    value.textContent = text(value.textContent, 'Document text', 1, 50000)
+    if (Buffer.byteLength(value.textContent, 'utf8') > 50000) fail('Document text must not exceed 50 KB.')
+  }
+  if (value.checklistItem !== undefined) value.checklistItem = text(value.checklistItem, 'Checklist item', 3, 120)
+  if (value.sensitivity !== undefined && (request.params.documentId || !['STANDARD', 'RESTRICTED'].includes(value.sensitivity))) fail('Sensitivity is set once, when the document is first recorded.')
+  next()
+}
+
+const isoDate = (value, label) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value)) ? value : fail(`${label} must be an ISO date-time.`)
+
+function idList(value, label) {
+  if (!Array.isArray(value) || value.length > 20 || new Set(value).size !== value.length) fail(`${label} must be a list of up to 20 distinct IDs.`)
+  for (const id of value) objectId(id, label)
+}
+
+export function validateReferral(request, _response, next) {
+  const value = body(request, ['responsibleUserId', 'reason', 'history', 'expectedAction', 'dueAt', 'documentIds', 'sensitiveDocumentIds', 'sensitiveAccessReason'],
+    ['responsibleUserId', 'reason', 'history', 'expectedAction', 'dueAt', 'documentIds', 'sensitiveDocumentIds'])
+  objectId(value.responsibleUserId, 'Responsible receiving actor')
+  value.reason = text(value.reason, 'Referral reason', 10, 1000)
+  value.history = text(value.history, 'Relevant history', 10, 2000)
+  value.expectedAction = text(value.expectedAction, 'Expected action', 5, 300)
+  if (Date.parse(isoDate(value.dueAt, 'Acknowledgement deadline')) <= Date.now()) fail('Acknowledgement deadline must be in the future.')
+  idList(value.documentIds, 'Documents')
+  idList(value.sensitiveDocumentIds, 'Restricted evidence')
+  if (value.sensitiveDocumentIds.length) value.sensitiveAccessReason = text(value.sensitiveAccessReason, 'Reason restricted evidence must be shared', 10, 500)
+  else if (value.sensitiveAccessReason !== undefined) fail('A sharing reason applies only when restricted evidence is included.')
+  next()
+}
+
+export function validateReferralResponse(request, _response, next) {
+  const value = body(request, ['action', 'reason'], ['action'])
+  if (!['ACKNOWLEDGE', 'ACCEPT', 'RETURN'].includes(value.action)) fail('Referral response is invalid.')
+  if (value.action !== 'ACKNOWLEDGE' || value.reason !== undefined) value.reason = text(value.reason, 'Response reason', 10, 1000)
+  next()
+}
+
+export function validateRoutingDecision(request, _response, next) {
+  const value = body(request, ['route', 'officeCode', 'reason'], ['route', 'reason'])
+  if (!['RETAIN', 'REFER'].includes(value.route)) fail('Route is invalid.')
+  if (value.route === 'REFER' ? !/^[A-Z0-9-]{2,40}$/.test(value.officeCode || '') : value.officeCode !== undefined) fail('A referral route needs one office code; retaining needs none.')
+  value.reason = text(value.reason, 'Routing decision reason', 10, 1000)
+  next()
+}
+
+export function referralIdParam(request, _response, next) {
+  objectId(request.params.referralId, 'Referral ID')
+  next()
+}
+
+export function validateBriefingApproval(request, _response, next) {
+  const value = body(request, ['reason'])
+  value.reason = text(value.reason, 'Officer briefing verification reason', 10, 500)
   next()
 }
 
@@ -149,7 +223,6 @@ export function validateConsent(request, _response, next) {
 
 const oneOf = (options, label) => (value) => options.includes(value) ? value : fail(`${label} is invalid.`)
 const explicit = (label) => (value) => typeof value === 'boolean' ? value : fail(`${label} must be explicit.`)
-const voiceConsentScopes = ['LIVE_VOICE', 'AUDIO_STORAGE', 'TRANSCRIPT_STORAGE']
 const voiceAnswers = {
   urgent: explicit('Urgency'),
   callerRole: oneOf(['SELF', 'REPRESENTATIVE'], 'Caller role'),
@@ -182,17 +255,34 @@ export function validateEmptyBody(request, _response, next) {
   next()
 }
 
+const audioTypes = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'video/webm']
+
+export function validateAnswerAudio(request, _response, next) {
+  if (Object.keys(request.query).some((key) => key !== 'fields')) fail('Unexpected parameter.')
+  const fields = String(request.query.fields || '').split(',')
+  if (!fields.length || fields.some((field) => !voiceAnswers[field]) || new Set(fields).size !== fields.length) fail('Unknown question.')
+  if (!audioTypes.includes((request.get('content-type') || '').split(';')[0].trim())) fail('Unsupported audio type.')
+  if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
+  next()
+}
+
+export function validateCallRecording(request, _response, next) {
+  if (Object.keys(request.query).length) fail('Unexpected parameter.')
+  if (!/^[a-f0-9]{24}$/.test(request.get('x-lookup-code') || '')) fail('Status code is invalid.')
+  const type = (request.get('content-type') || '').split(';')[0].trim()
+  if (!audioTypes.includes(type)) fail('Unsupported audio type.')
+  if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
+  request.audioType = type
+  next()
+}
+
 export function validateVoiceIntake(request, _response, next) {
-  const value = body(request, ['mode', 'callbackReason', 'consents', 'answers', 'correctedFields', 'aiFields', 'confirmation', 'transcript'], ['mode', 'consents', 'answers'])
+  const value = body(request, ['mode', 'callbackReason', 'answers', 'correctedFields', 'aiFields', 'confirmation', 'transcript', 'aiSensitive'], ['mode', 'answers'])
   oneOf(['INTAKE', 'CALLBACK'], 'Mode')(value.mode)
-  if (value.mode === 'CALLBACK') oneOf(['LIVE_VOICE_REFUSED', 'CALLER_REQUESTED_HUMAN', 'URGENT_HANDOFF', 'SENSITIVE_OR_UNCLEAR'], 'Callback reason')(value.callbackReason)
+  // The only callback route is the danger handoff; everything else stays in the normal intake.
+  if (value.mode === 'CALLBACK') oneOf(['URGENT_HANDOFF'], 'Callback reason')(value.callbackReason)
   else if (value.callbackReason !== undefined) fail('Only a callback request has a callback reason.')
-  for (const field of ['consents', 'answers']) if (!value[field] || typeof value[field] !== 'object' || Array.isArray(value[field])) fail(`${field} must be an object.`)
-  for (const [scope, state] of Object.entries(value.consents)) {
-    oneOf(voiceConsentScopes, 'Consent scope')(scope)
-    oneOf(['GRANTED', 'DENIED'], 'Consent choice')(state)
-  }
-  if (value.mode === 'INTAKE' && (value.consents.LIVE_VOICE !== 'GRANTED' || voiceConsentScopes.some((scope) => !value.consents[scope]))) fail('Voice intake needs live-voice consent and explicit storage choices.')
+  if (!value.answers || typeof value.answers !== 'object' || Array.isArray(value.answers)) fail('answers must be an object.')
   const fields = voiceFields(value)
   const keys = Object.keys(value.answers)
   if (keys.length !== fields.length || keys.some((key) => !fields.includes(key))) fail('Unexpected or missing answers.')
@@ -201,9 +291,9 @@ export function validateVoiceIntake(request, _response, next) {
     if (value[list] !== undefined && (!Array.isArray(value[list]) || value[list].some((field) => !fields.includes(field)) || new Set(value[list]).size !== value[list].length)) fail(`${list} is invalid.`)
   }
   if (value.confirmation !== undefined) oneOf(['BUTTON', 'VOICE'], 'Confirmation')(value.confirmation)
+  if (value.aiSensitive !== undefined) explicit('Sensitivity flag')(value.aiSensitive)
   if (value.transcript !== undefined) {
-    // Transcript retention needs explicit consent; raw audio is never accepted at all.
-    if (value.consents.TRANSCRIPT_STORAGE !== 'GRANTED') fail('A transcript can be kept only with transcript consent.')
+    // Kept with the call recording under the greeting's notice. Audio never travels inside this JSON body.
     if (!Array.isArray(value.transcript) || !value.transcript.length || value.transcript.length > 300) fail('Transcript is invalid.')
     value.transcript = value.transcript.map((turn) => {
       if (!turn || typeof turn !== 'object' || Object.keys(turn).some((key) => !['speaker', 'text'].includes(key))) fail('Transcript is invalid.')

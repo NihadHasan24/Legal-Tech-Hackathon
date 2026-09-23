@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "start": "node --env-file-if-exists=.env src/server.js",
-    "test": "node --env-file-if-exists=.env --test",
+    "test": "node --env-file-if-exists=.env --test --test-concurrency=1",
+    "check:production-static": "node --env-file-if-exists=.env --test src/productionStatic.test.js",
     "seed": "node --env-file-if-exists=.env src/seeds/demoUsers.js",
-    "check:live": "node --env-file-if-exists=.env src/scripts/checkLiveVoice.js"
+    "check:voice": "node --env-file-if-exists=.env src/scripts/checkVoiceAi.js"
   },
   "dependencies": {
     "express": "5.2.1",

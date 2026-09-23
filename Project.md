@@ -581,6 +581,8 @@ Current refined design:
 
 **Pending law-team verification:** exact consent/lawful-basis requirements for live processing, recording, transcription, retention, and deletion.
 
+> **Project decision (2026-09-23, user-approved):** the web 16699 simulation records every call. The recorded greeting tells the caller that the call is recorded; no consent question or opt-out is offered, and the caller-initiated "talk to a person" option is removed. Immediate danger still stops questioning and hands off to a human callback. For the voice route this supersedes the per-call live-processing, stored-audio, and transcript choices and the refusal-to-callback path described above. The lawful basis for recording without an opt-out remains **pending law-team verification** under the data-protection section.
+
 ## 7.6 Voice provenance rule
 
 The record should conceptually separate:
@@ -600,7 +602,7 @@ Example for Moyuri:
 
 ## 7.7 What is not decided yet
 
-> **Decided 2026-09-22 (user instruction):** voice AI vendor/API = Google Gemini Live API (Gemini Developer API), model `gemini-3.8-live`. The browser connects with short-lived ephemeral tokens; the permanent key stays server-side. The remaining items below are still undecided.
+> **Decided 2026-09-23 (user instruction):** voice AI = Groq free tier. Recorded human Bangla prompts play the questions (no text-to-speech vendor), `whisper-large-v3` transcribes the caller's answer, and `openai/gpt-oss-120b` extracts structured answers. The key stays server-side; each spoken-answer clip is transcribed and discarded, while the full call recording is kept under the Section 7.5 always-record decision. Supersedes the 2026-09-22 Gemini decision, which failed because Google denied API access to this account. The remaining items below are still undecided.
 
 Do not assume any of the following until `Goal.md` or a later explicit decision:
 
@@ -1273,12 +1275,12 @@ Each item must eventually be marked in three dimensions: **Implemented / Integra
 
 - [ ] **T1** Lawyer change + repeated inactivity + payment reconciliation
 - [ ] **T2** Jurisdiction ping-pong + escalation
-- [ ] **T3** Related incident cases + shared evidence
-- [ ] **T4** Duplicate detection + human review
+- [x] **T3** Related incident cases + shared evidence
+- [x] **T4** Duplicate detection + human review
 - [ ] **T5** Conversational Bangla intake agent
 - [ ] **T6** Document summary/checklist agent
 - [ ] **T7** Settlement drafting assistant
-- [ ] **T8** Multi-agent triage pipeline
+- [x] **T8** Multi-agent triage pipeline
 - [ ] **T9** Offline-first sync + conflict/integrity handling
 - [ ] **T10** Low-bandwidth PWA
 - [ ] **T11** Asynchronous secure e-signature
@@ -1546,7 +1548,7 @@ If an AI remembers only one section, it must remember this:
 5. Safe contact, representation, provenance, permissions, document history, tasks, and audit follow the record.
 6. The **16699 telecom connection is not available**; our current solution is a clearly labelled **web-based 16699 Bangla Voice Access simulation** with a real internal intake workflow.
 7. Voice AI asks controlled questions, records provenance, supports read-back/correction, creates the Application ID, and hands sensitive/ambiguous cases to humans.
-8. Full audio recording is not assumed. Live voice processing, stored audio, transcript, and structured facts are legally distinct data-handling questions. Refusal must not automatically become denial of service; provide a lawful minimal-data/human fallback.
+8. Full audio recording is not assumed. Live voice processing, stored audio, transcript, and structured facts are legally distinct data-handling questions. Refusal must not automatically become denial of service; provide a lawful minimal-data/human fallback. (For the web 16699 voice route, superseded on 2026-09-23 by the always-record decision in Section 7.5.)
 9. For **Moyuri**, Ripon's report must remain visibly representative-reported until Moyuri confirms it. Safe contact is central. If an unsafe person answers, disclose nothing sensitive.
 10. **Ripon** must complete a meaningful task without sighted help.
 11. **Nabila** requires urgency review, restricted evidence, and tracked referral with non-acknowledgement escalation.

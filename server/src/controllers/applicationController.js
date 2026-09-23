@@ -1,5 +1,5 @@
-import { createLiveVoiceToken } from '../services/ai/liveVoice.js'
-import { acceptApplication, addFact, addRepresentation, completeTask, correctFact, createTask, getApplication, getApplicationAudit, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, recordConsent, recordContactAttempt, reviewApplication, searchRecord, setSafeContact, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
+import { extractAnswers, transcribeAnswer } from '../services/ai/groq.js'
+import { acceptApplication, addFact, addRepresentation, completeTask, correctFact, createTask, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, recordConsent, recordContactAttempt, reviewApplication, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
 
 export async function submit(request, response) {
   response.status(201).json(await submitApplication(request.body, request.auth))
@@ -9,8 +9,19 @@ export async function submitVoice(request, response) {
   response.status(201).json(await submitVoiceIntake(request.body))
 }
 
-export async function startLiveVoice(_request, response) {
-  response.status(201).json(await createLiveVoiceToken())
+export async function storeRecording(request, response) {
+  response.status(201).json(await storeCallRecording(request.params.applicationId, request.get('x-lookup-code'), request.body, request.audioType))
+}
+
+export async function readRecording(request, response) {
+  const recording = await getCallRecording(request.params.applicationId, request.auth)
+  response.type(recording.mimeType).send(Buffer.from(recording.audio))
+}
+
+export async function transcribeVoiceAnswer(request, response) {
+  const text = await transcribeAnswer(request.body, request.get('content-type'))
+  const { values, sensitive } = await extractAnswers(text, request.query.fields.split(','))
+  response.json({ text, values, sensitive })
 }
 
 export async function readTranscript(request, response) {
@@ -35,6 +46,18 @@ export async function review(request, response) {
 
 export async function overrideReview(request, response) {
   response.json(await reviewApplication(request.params.applicationId, request.body, request.auth, true))
+}
+
+export async function priorityOverride(request, response) {
+  response.json(await overridePriority(request.params.applicationId, request.body, request.auth))
+}
+
+export async function readHistory(request, response) {
+  response.json(await getCaseHistory(request.params.applicationId, request.auth))
+}
+
+export async function helplineStatus(request, response) {
+  response.json(await lookupHelplineStatus(request.body.identifier, request.body.lookupCode, request.auth, request.body.contactChannel))
 }
 
 export async function accept(request, response) {

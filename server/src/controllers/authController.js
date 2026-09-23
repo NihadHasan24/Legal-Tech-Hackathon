@@ -1,7 +1,11 @@
-import { login, logout } from '../services/authService.js'
+import { getDemoCredentials, login, logout } from '../services/authService.js'
+
+export async function demoAccount(request, response) {
+  response.json(await getDemoCredentials(request.params.role))
+}
 
 export async function signIn(request, response) {
-  response.json(await login(request.body.username, request.body.password))
+  response.json(await login(request.body.username, request.body.password, request.ip))
 }
 
 export function currentUser(request, response) {
