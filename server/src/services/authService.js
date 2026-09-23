@@ -8,19 +8,20 @@ export const tokenHash = (token) => createHash('sha256').update(token).digest('h
 
 const failedLogins = new Map()
 const loginWindowMs = 15 * 60 * 1000
-const maxLoginFailures = 5
+const maxLoginFailures = 10
 const maxLoginBuckets = 4096
 const demoAccounts = new Map([['DLAO_OFFICER', 'demo.officer'], ['UDC_OPERATOR', 'demo.udc']])
 const staffLoginEnabled = () => process.env.NODE_ENV !== 'production' || process.env.STAFF_LOGIN_ENABLED === 'true'
 
 export async function getDemoCredentials(role) {
-  if (process.env.NODE_ENV === 'production') throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Demo authentication is disabled in production.')
+  // Production quick-fill is opt-in: the operator must supply the fictional passwords as DEMO_CREDENTIALS JSON.
+  if (process.env.NODE_ENV === 'production' && !process.env.DEMO_CREDENTIALS) throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Demo authentication is disabled in production.')
   const username = demoAccounts.get(role)
   if (!username) throw new HttpError(404, 'DEMO_ACCOUNT_NOT_FOUND', 'That demo role is not available.')
 
   let credentials
   try {
-    credentials = JSON.parse(await readFile(new URL('../../.demo-credentials.json', import.meta.url), 'utf8'))
+    credentials = JSON.parse(process.env.DEMO_CREDENTIALS || await readFile(new URL('../../.demo-credentials.json', import.meta.url), 'utf8'))
   } catch (error) {
     if (error.code === 'ENOENT') throw new HttpError(503, 'DEMO_ACCOUNTS_NOT_SEEDED', 'Demo accounts are not ready. Seed the server demo accounts first.')
     throw error

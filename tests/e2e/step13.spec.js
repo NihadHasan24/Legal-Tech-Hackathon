@@ -6,7 +6,7 @@ test('Step 13: API security headers, login throttling, and route focus are enfor
   expect(health.headers()['x-frame-options']).toBe('DENY')
   expect(health.headers()['content-security-policy']).toContain("default-src 'none'")
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
     const response = await page.request.post('/api/auth/login', { data: { username: 'step13.throttle', password: 'not-the-password' } })
     expect(response.status()).toBe(401)
   }
