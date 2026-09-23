@@ -1,19 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api.js'
+import { Badge, Bi, Panel, Term, bi, num, say, tr } from '../components/Bi.jsx'
 
-const componentNames = {
-  CASE_CATEGORIZER: 'Case categorizer',
-  PROCESS_SAFETY: 'Process, compliance, and safety checker',
-  URGENCY_ROUTING: 'Urgency and routing recommender',
-}
 const categories = ['LABOUR', 'FAMILY', 'LAND', 'CRIMINAL', 'OTHER', 'UNCERTAIN']
-const dispositions = [
-  ['PRIORITIZE_FOR_HUMAN_REVIEW', 'Prioritize for human review'],
-  ['CONTINUE_ROUTINE_REVIEW', 'Continue routine review'],
-  ['SEEK_MORE_INFORMATION', 'Seek more information'],
-  ['REQUEST_JURISDICTION_REVIEW', 'Request jurisdiction review'],
-  ['NO_CHANGE', 'No change'],
-]
+const dispositions = ['PRIORITIZE_FOR_HUMAN_REVIEW', 'CONTINUE_ROUTINE_REVIEW', 'SEEK_MORE_INFORMATION', 'REQUEST_JURISDICTION_REVIEW', 'NO_CHANGE']
 
 export default function TriagePanel({ applicationId, token }) {
   const [assessments, setAssessments] = useState(null)
@@ -45,7 +35,7 @@ export default function TriagePanel({ applicationId, token }) {
       setAssessments((current) => [assessment, ...(current ?? []).filter(({ id }) => id !== assessment.id)])
       const recommendation = assessment.components.find(({ name }) => name === 'CASE_CATEGORIZER')?.recommendation
       if (categories.includes(recommendation)) setCategory(recommendation)
-      setNotice('Triage suggestions recorded for human review. No priority, route, or case outcome was changed.')
+      setNotice(bi('Suggestions ready. Nothing was changed.', 'পরামর্শ তৈরি। কিছু বদলানো হয়নি।'))
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
 
@@ -60,38 +50,36 @@ export default function TriagePanel({ applicationId, token }) {
       })
       setAssessments((current) => current.map((item) => item.id === decided.id ? decided : item))
       setReason('')
-      setNotice('Officer triage decision recorded. Separate priority and routing controls remain unchanged.')
+      setNotice(bi('Triage decision saved. Priority and route are unchanged.', 'বাছাই সিদ্ধান্ত সংরক্ষিত। অগ্রাধিকার ও পথ অপরিবর্তিত।'))
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
 
-  return <section className="card" aria-labelledby="triage-title">
-    <h2 id="triage-title">Multi-agent triage suggestions</h2>
-    <p className="muted">Decision support only. Components use structured category, safety, and workflow flags; names, contact details, free-text complaint, and document content are not sent to the configured AI provider. Final priority, routing, eligibility, and outcomes stay with authorised humans.</p>
+  return <Panel id="triage-title" en="AI triage" bn="এআই বাছাই" hint={latest ? say(latest.status) : assessments && bi('Not run', 'চালানো হয়নি')}>
+    <p className="muted"><Bi en="AI suggests, you decide. No names, contact details or statements are sent." bn="এআই পরামর্শ দেয়, সিদ্ধান্ত আপনার। নাম, নম্বর বা বক্তব্য পাঠানো হয় না।" /></p>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
-    <button type="button" onClick={run} disabled={busy}>{latest?.status === 'PENDING_HUMAN_REVIEW' ? 'Refresh triage assessment' : 'Run triage components'}</button>
-    {assessments === null && !error && <p role="status">Loading triage history...</p>}
-    {latest && <div className="record-list">
-      <p>Assessment: {latest.aiAssisted ? `AI-assisted (${latest.model})` : 'deterministic rules fallback'} - {latest.status.replaceAll('_', ' ').toLowerCase()}</p>
-      {latest.disagreements.map((conflict, index) => <p role="alert" className="error" key={`${conflict.dimension}-${index}`}>Component disagreement: {conflict.summary}</p>)}
-      {latest.components.map((component) => <article className="record-detail" key={component.name}>
-        <h3>{componentNames[component.name]}: {component.recommendation.replaceAll('_', ' ').toLowerCase()}</h3>
-        <p>Urgency signal: {component.urgencySignal.toLowerCase()} - human review required</p>
-        <ul>{component.reasons.map((item, index) => <li key={`${component.name}-reason-${index}`}>{item}</li>)}</ul>
-        <p>Evidence references: {component.evidenceRefs.length ? component.evidenceRefs.map((ref) => <code key={ref}>{ref} </code>) : 'None recorded'}</p>
-        <p className="muted">Uncertainty: {component.uncertainty}</p>
-      </article>)}
-      {latest.status === 'PENDING_HUMAN_REVIEW' ? <form className="form-stack" onSubmit={decide}>
-        <h3>Officer decision - human authority</h3>
-        <label htmlFor="triage-final-category">Officer-reviewed category</label>
-        <select id="triage-final-category" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item} value={item}>{item.replaceAll('_', ' ')}</option>)}</select>
-        <label htmlFor="triage-disposition">Human triage disposition</label>
-        <select id="triage-disposition" value={disposition} onChange={(event) => setDisposition(event.target.value)}>{dispositions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-        <label htmlFor="triage-decision-reason">Reason for the officer's triage decision</label>
+    <button type="button" onClick={run} disabled={busy}>{latest?.status === 'PENDING_HUMAN_REVIEW' ? <Bi en="Run again" bn="আবার চালান" /> : <Bi en="Run triage" bn="বাছাই চালান" />}</button>
+    {assessments === null && !error && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
+    {latest && <>
+      <p className="muted">{latest.aiAssisted ? `${bi('AI', 'এআই')} (${latest.model})` : bi('Rules only', 'শুধু নিয়ম')} · <Term code={latest.status} /></p>
+      {latest.disagreements.map((conflict, index) => <p role="alert" className="error" key={`${conflict.dimension}-${index}`}><Bi en="Components disagree:" bn="মতভেদ:" /> {tr(conflict.summary)}</p>)}
+      <div className="triage-grid">{latest.components.map((component) => <article className="mini-card" key={component.name}>
+        <h3><Term code={component.name} /></h3>
+        <p><Badge code={component.recommendation} /> <small><Bi en="Urgency" bn="জরুরিতা" />: <Term code={component.urgencySignal} /></small></p>
+        <ul>{component.reasons.map((item, index) => <li key={`${component.name}-reason-${index}`}>{tr(item)}</li>)}</ul>
+        <small className="muted"><Bi en="Uncertainty" bn="অনিশ্চয়তা" />: {tr(component.uncertainty)}{component.evidenceRefs.length ? <> · <Bi en="Sources" bn="উৎস" />: {component.evidenceRefs.map((ref) => <code key={ref}>{ref} </code>)}</> : null}</small>
+      </article>)}</div>
+      {latest.status === 'PENDING_HUMAN_REVIEW' ? <form className="form-stack inline-form" onSubmit={decide}>
+        <h3><Bi en="Your decision" bn="আপনার সিদ্ধান্ত" /></h3>
+        <label htmlFor="triage-final-category"><Bi en="Case type" bn="মামলার ধরন" /></label>
+        <select id="triage-final-category" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item} value={item}>{say(item)}</option>)}</select>
+        <label htmlFor="triage-disposition"><Bi en="Action" bn="পদক্ষেপ" /></label>
+        <select id="triage-disposition" value={disposition} onChange={(event) => setDisposition(event.target.value)}>{dispositions.map((value) => <option key={value} value={value}>{say(value)}</option>)}</select>
+        <label htmlFor="triage-decision-reason"><Bi en="Reason" bn="কারণ" /></label>
         <textarea id="triage-decision-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="10" maxLength="1000" required />
-        <button type="submit" disabled={busy || reason.trim().length < 10}>Record human triage decision</button>
-      </form> : latest.humanDecision && <p role="status">Officer decision: {latest.humanDecision.category} - {latest.humanDecision.disposition.replaceAll('_', ' ').toLowerCase()}. {latest.humanDecision.reason}</p>}
-      {assessments.length > 1 && <p className="muted">{assessments.length - 1} older assessment(s) remain in the record history.</p>}
-    </div>}
-  </section>
+        <button type="submit" disabled={busy || reason.trim().length < 10}><Bi en="Save triage decision" bn="সিদ্ধান্ত সংরক্ষণ" /></button>
+      </form> : latest.humanDecision && <p role="status"><Bi en="Officer decision:" bn="কর্মকর্তার সিদ্ধান্ত:" /> <Term code={latest.humanDecision.category} /> · <Term code={latest.humanDecision.disposition} />. {latest.humanDecision.reason}</p>}
+      {assessments.length > 1 && <p className="muted"><Bi en={`${assessments.length - 1} earlier run(s) kept in history.`} bn={`আগের ${num(assessments.length - 1)}টি ফলাফল ইতিহাসে আছে।`} /></p>}
+    </>}
+  </Panel>
 }

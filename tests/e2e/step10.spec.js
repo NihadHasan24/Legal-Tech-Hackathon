@@ -1,6 +1,6 @@
 /* global process */
 import { expect, test } from '@playwright/test'
-import { signIn } from './support.js'
+import { expand, signIn } from './support.js'
 
 test('Step 10: DLAO links common evidence once and reviews duplicate suggestions without merging', async ({ page, request }) => {
   test.setTimeout(150000)
@@ -41,6 +41,8 @@ test('Step 10: DLAO links common evidence once and reviews duplicate suggestions
     await expect(page.getByRole('heading', { name: applicationId })).toBeVisible()
   }
   await openApplication(cases[0].applicationId)
+  await expand(page, /^Related cases/)
+  await expand(page, 'Link cases')
   await page.getByLabel('Group label').fill('Fictional fire claims')
   await page.getByLabel('Two or more other accepted Application IDs').fill(`${cases[1].applicationId}, ${cases[2].applicationId}`)
   await page.getByLabel('Why these Cases are related').fill('These fictional applicants report the same tabletop factory event.')
@@ -78,19 +80,21 @@ test('Step 10: DLAO links common evidence once and reviews duplicate suggestions
   }
 
   await openApplication(duplicateIds[0])
+  await expand(page, /^Possible duplicates/)
   const reviewPanel = page.locator('section[aria-labelledby="duplicate-title"]')
-  const exactCard = reviewPanel.locator('article.record-detail').filter({ hasText: duplicateIds[1] })
-  await expect(exactCard).toContainText('Similarity score (not a probability): 100/100')
-  await expect(exactCard.getByText(/Contact number matches exactly/)).toBeVisible()
-  await exactCard.getByLabel('Human review reason').fill('The matching synthetic profile was confirmed by the human reviewer.')
-  await exactCard.getByRole('button', { name: 'Confirm duplicate relationship (keep separate)' }).click()
-  await expect(reviewPanel.getByRole('status').filter({ hasText: 'records remain separate' }).last()).toBeVisible()
+  const exactCard = reviewPanel.locator('article').filter({ hasText: duplicateIds[1] })
+  await expect(exactCard).toContainText('100/100')
+  await expect(exactCard.locator('tr').filter({ hasText: 'Contact number' })).toContainText('Same')
+  await exactCard.getByLabel('Review reason').fill('The matching synthetic profile was confirmed by the human reviewer.')
+  await exactCard.getByRole('button', { name: 'Same person (keep separate)' }).click()
+  await expect(reviewPanel.getByRole('status').filter({ hasText: 'kept separate' }).last()).toBeVisible()
 
   await openApplication(duplicateIds[3])
-  const trapCard = page.locator('section[aria-labelledby="duplicate-title"] article.record-detail').filter({ hasText: duplicateIds[4] })
-  await expect(trapCard).toContainText('Similarity score (not a probability): 55/100')
+  await expand(page, /^Possible duplicates/)
+  const trapCard = page.locator('section[aria-labelledby="duplicate-title"] article').filter({ hasText: duplicateIds[4] })
+  await expect(trapCard).toContainText('55/100')
   await expect(trapCard).toContainText('Date of birth')
-  await trapCard.getByLabel('Human review reason').fill('Same fictional name and district do not establish the same person.')
-  await trapCard.getByRole('button', { name: 'Mark as different people' }).click()
-  await expect(trapCard.getByRole('status')).toContainText('different people')
+  await trapCard.getByLabel('Review reason').fill('Same fictional name and district do not establish the same person.')
+  await trapCard.getByRole('button', { name: 'Different people' }).click()
+  await expect(trapCard.getByRole('status')).toContainText(/different people/i)
 })

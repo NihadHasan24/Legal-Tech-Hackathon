@@ -1,3 +1,4 @@
+import { bi } from '../components/Bi.jsx'
 const DATABASE = 'dlas-offline-v1'
 const STORE = 'drafts'
 const SIGNATURE_STORE = 'signature-queue'
@@ -41,16 +42,16 @@ async function key(passphrase, salt) {
 }
 
 export async function saveDraft({ id, ownerId, status, value, passphrase }) {
-  if (signedOut) throw new Error('Sign in again before saving a local draft.')
+  if (signedOut) throw new Error(bi('Sign in again before saving a local draft.', 'খসড়া রাখার আগে আবার সাইন ইন করুন।'))
   const startedIn = sessionEpoch
-  if (passphrase.length < 8) throw new Error('Use a local draft passphrase of at least 8 characters.')
+  if (passphrase.length < 8) throw new Error(bi('Use a local draft passphrase of at least 8 characters.', 'কমপক্ষে ৮ অক্ষরের পাসফ্রেজ দিন।'))
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await key(passphrase, salt), encoder.encode(JSON.stringify(value))))
   const hash = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher)))
-  if (signedOut || startedIn !== sessionEpoch) throw new Error('Sign in again before saving a local draft.')
+  if (signedOut || startedIn !== sessionEpoch) throw new Error(bi('Sign in again before saving a local draft.', 'খসড়া রাখার আগে আবার সাইন ইন করুন।'))
   await operation('readwrite', (store) => {
-    if (signedOut || startedIn !== sessionEpoch) throw new Error('Sign in again before saving a local draft.')
+    if (signedOut || startedIn !== sessionEpoch) throw new Error(bi('Sign in again before saving a local draft.', 'খসড়া রাখার আগে আবার সাইন ইন করুন।'))
     return store.put({ id, ownerId, status, salt: hex(salt), iv: hex(iv), cipher: hex(cipher), hash, updatedAt: new Date().toISOString() })
   })
   return { id, hash }
@@ -58,14 +59,14 @@ export async function saveDraft({ id, ownerId, status, value, passphrase }) {
 
 export async function loadDraft(id, ownerId, passphrase) {
   const row = await operation('readonly', (store) => store.get(id))
-  if (!row || row.ownerId !== ownerId) throw new Error('Draft not found for this account.')
+  if (!row || row.ownerId !== ownerId) throw new Error(bi('Draft not found for this account.', 'এই অ্যাকাউন্টে খসড়াটি পাওয়া যায়নি।'))
   const cipher = bytes(row.cipher)
   const hash = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher)))
-  if (hash !== row.hash) throw new Error('Local draft integrity check failed. Do not sync this draft.')
+  if (hash !== row.hash) throw new Error(bi('Local draft integrity check failed. Do not sync this draft.', 'খসড়ার সত্যতা যাচাই ব্যর্থ। এটি সিঙ্ক করবেন না।'))
   try {
     const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(row.iv) }, await key(passphrase, bytes(row.salt)), cipher)
     return { status: row.status, value: JSON.parse(decoder.decode(clear)), hashValid: true }
-  } catch { throw new Error('Draft passphrase is incorrect or the encrypted draft is damaged.') }
+  } catch { throw new Error(bi('Draft passphrase is incorrect or the encrypted draft is damaged.', 'পাসফ্রেজ ভুল, বা খসড়াটি নষ্ট হয়েছে।')) }
 }
 
 export async function listDrafts(ownerId) {
@@ -74,16 +75,16 @@ export async function listDrafts(ownerId) {
 }
 
 export async function saveSignaturePacket({ id, ownerId, value, passphrase }) {
-  if (signedOut) throw new Error('Sign in again before saving a local signature.')
+  if (signedOut) throw new Error(bi('Sign in again before saving a local signature.', 'স্বাক্ষর রাখার আগে আবার সাইন ইন করুন।'))
   const startedIn = sessionEpoch
-  if (passphrase.length < 8) throw new Error('Use a local passphrase of at least 8 characters to protect the offline signature packet.')
+  if (passphrase.length < 8) throw new Error(bi('Use a local passphrase of at least 8 characters to protect the offline signature packet.', 'অফলাইন স্বাক্ষর সুরক্ষায় কমপক্ষে ৮ অক্ষরের পাসফ্রেজ দিন।'))
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await key(passphrase, salt), encoder.encode(JSON.stringify(value))))
   const hash = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher)))
-  if (signedOut || startedIn !== sessionEpoch) throw new Error('Sign in again before saving a local signature.')
+  if (signedOut || startedIn !== sessionEpoch) throw new Error(bi('Sign in again before saving a local signature.', 'স্বাক্ষর রাখার আগে আবার সাইন ইন করুন।'))
   await operation('readwrite', (store) => {
-    if (signedOut || startedIn !== sessionEpoch) throw new Error('Sign in again before saving a local signature.')
+    if (signedOut || startedIn !== sessionEpoch) throw new Error(bi('Sign in again before saving a local signature.', 'স্বাক্ষর রাখার আগে আবার সাইন ইন করুন।'))
     return store.put({ id, ownerId, salt: hex(salt), iv: hex(iv), cipher: hex(cipher), hash, updatedAt: new Date().toISOString() })
   }, SIGNATURE_STORE)
 }
@@ -95,13 +96,13 @@ export async function listSignaturePackets(ownerId) {
 
 export async function loadSignaturePacket(id, ownerId, passphrase) {
   const row = await operation('readonly', (store) => store.get(id), SIGNATURE_STORE)
-  if (!row || row.ownerId !== ownerId) throw new Error('Offline signature not found for this account.')
+  if (!row || row.ownerId !== ownerId) throw new Error(bi('Offline signature not found for this account.', 'এই অ্যাকাউন্টে অফলাইন স্বাক্ষরটি পাওয়া যায়নি।'))
   const cipher = bytes(row.cipher)
-  if (hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher))) !== row.hash) throw new Error('Offline signature integrity check failed. Do not sync it.')
+  if (hex(new Uint8Array(await crypto.subtle.digest('SHA-256', cipher))) !== row.hash) throw new Error(bi('Offline signature integrity check failed. Do not sync it.', 'অফলাইন স্বাক্ষরের সত্যতা যাচাই ব্যর্থ। এটি সিঙ্ক করবেন না।'))
   try {
     const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(row.iv) }, await key(passphrase, bytes(row.salt)), cipher)
     return JSON.parse(decoder.decode(clear))
-  } catch { throw new Error('Signing passphrase is incorrect or the queued signature is damaged.') }
+  } catch { throw new Error(bi('Signing passphrase is incorrect or the queued signature is damaged.', 'পাসফ্রেজ ভুল, বা সারির স্বাক্ষরটি নষ্ট হয়েছে।')) }
 }
 
 export async function removeSignaturePacket(id, ownerId) {

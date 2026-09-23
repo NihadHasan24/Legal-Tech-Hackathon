@@ -11,6 +11,7 @@ test.skip(!sample, 'Set LIVE_VOICE_SAMPLE to a Bangla WAV recording to run this.
 
 test('a spoken answer is transcribed and fills approved fields', async ({ page }) => {
   await page.goto('/voice')
+  await page.getByRole('button', { name: 'বাংলা', exact: true }).click()
   await page.getByRole('button', { name: 'কল করুন', exact: true }).click()
   await expect(page.getByRole('heading', { name: steps.urgent.prompt })).toBeFocused()
   await page.keyboard.press('2')

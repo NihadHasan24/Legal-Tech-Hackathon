@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api.js'
+import { AddForm, Badge, Bi, Panel, Term, bi, num, say } from '../components/Bi.jsx'
 
 const sampleDocuments = [
   ['identity-note.txt', 'Applicant identity evidence', 'READABLE'],
@@ -16,6 +17,13 @@ const checklist = {
   CRIMINAL: ['Applicant identity evidence', 'Police or court document', 'Incident chronology'],
   OTHER: ['Applicant identity evidence', 'Problem chronology', 'Available supporting record'],
 }
+const itemNames = {
+  'Applicant identity evidence': 'আবেদনকারীর পরিচয়ের প্রমাণ', 'Relationship record': 'সম্পর্কের প্রমাণ', 'Relevant communication': 'প্রাসঙ্গিক যোগাযোগ',
+  'Land record or deed': 'জমির রেকর্ড বা দলিল', 'Location or plot details': 'অবস্থান বা দাগের তথ্য', 'Witness or other supporting record': 'সাক্ষী বা অন্য সহায়ক রেকর্ড',
+  'Employment or wage record': 'চাকরি বা মজুরির রেকর্ড', 'Employer communication': 'মালিকের সাথে যোগাযোগ', 'Police or court document': 'পুলিশ বা আদালতের কাগজ',
+  'Incident chronology': 'ঘটনার ক্রম', 'Problem chronology': 'সমস্যার ক্রম', 'Available supporting record': 'প্রাপ্ত সহায়ক রেকর্ড', 'Other context': 'অন্যান্য প্রসঙ্গ',
+}
+const item = (name) => itemNames[name] ? <Bi en={name} bn={itemNames[name]} /> : name
 
 export default function DocumentReview({ applicationId, caseType, documents, token, onChanged }) {
   const [briefing, setBriefing] = useState(null)
@@ -34,10 +42,10 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
     return () => controller.abort()
   }, [applicationId, token])
 
-  async function upload(filename, textContent, item, quality) {
-    if (!/^[\w .()-]+\.txt$/i.test(filename) || new TextEncoder().encode(textContent).byteLength > 50000 || !textContent.trim()) throw new Error('Use a nonempty fictional .txt file under 50 KB.')
+  async function upload(filename, textContent, checklistName, quality) {
+    if (!/^[\w .()-]+\.txt$/i.test(filename) || new TextEncoder().encode(textContent).byteLength > 50000 || !textContent.trim()) throw new Error(bi('Use a non-empty fictional .txt file under 50 KB.', '৫০ কেবির কম, খালি নয় এমন .txt ফাইল দিন।'))
     return api(`/api/applications/${applicationId}/documents`, { token, method: 'POST', body: {
-      label: filename.replace(/\.txt$/i, '').replaceAll('-', ' '), filename, textContent, checklistItem: item, qualityState: quality,
+      label: filename.replace(/\.txt$/i, '').replaceAll('-', ' '), filename, textContent, checklistItem: checklistName, qualityState: quality,
     } })
   }
 
@@ -47,7 +55,7 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
     try {
       for (const file of files) await upload(file.name, await file.text(), checklistItem, qualityState)
       setFiles([])
-      setNotice(`${files.length} fictional text document${files.length === 1 ? '' : 's'} uploaded and versioned.`)
+      setNotice(bi(`${files.length} file(s) uploaded.`, `${num(files.length)}টি ফাইল আপলোড হয়েছে।`))
       onChanged()
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
@@ -55,12 +63,12 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
   async function uploadSamples() {
     setError(''); setNotice(''); setBusy(true)
     try {
-      for (const [filename, item, quality] of sampleDocuments) {
+      for (const [filename, checklistName, quality] of sampleDocuments) {
         const response = await fetch(`/samples/${filename}`, { cache: 'no-store' })
-        if (!response.ok) throw new Error(`Could not load sample ${filename}.`)
-        await upload(filename, await response.text(), item, quality)
+        if (!response.ok) throw new Error(bi(`Could not load sample ${filename}.`, `নমুনা ${filename} লোড হয়নি।`))
+        await upload(filename, await response.text(), checklistName, quality)
       }
-      setNotice('Six fictional documents uploaded. The deed is deliberately unreadable; the witness item is deliberately missing.')
+      setNotice(bi('Six fictional documents uploaded. The deed is unreadable and the witness item is missing on purpose.', 'ছয়টি কাল্পনিক নথি আপলোড হয়েছে। দলিল ইচ্ছাকৃতভাবে অপাঠযোগ্য, সাক্ষীর কাগজ নেই।'))
       onChanged()
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
@@ -70,7 +78,7 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
     try {
       const result = await api(`/api/applications/${applicationId}/briefing`, { token, method: 'POST' })
       setBriefing(result)
-      setNotice('Provisional briefing generated. An officer must verify every source before approval.')
+      setNotice(bi('Draft briefing ready. Check every source before approving.', 'খসড়া সারসংক্ষেপ তৈরি। অনুমোদনের আগে প্রতিটি উৎস দেখুন।'))
       onChanged()
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
@@ -82,33 +90,41 @@ export default function DocumentReview({ applicationId, caseType, documents, tok
       await api(`/api/applications/${applicationId}/briefing/approve`, { token, method: 'POST', body: { reason: approvalReason } })
       setBriefing(await api(`/api/applications/${applicationId}/briefing`, { token }))
       setApprovalReason('')
-      setNotice('Officer verification of the briefing was recorded. This is not an eligibility or legal decision.')
+      setNotice(bi('Briefing accuracy approved. This is not a legal decision.', 'সারসংক্ষেপের নির্ভুলতা অনুমোদিত। এটি আইনি সিদ্ধান্ত নয়।'))
       onChanged()
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
 
-  return <section className="card" aria-labelledby="briefing-title">
-    <h2 id="briefing-title">Document review and cited briefing</h2>
-    <p className="muted">Fictional plain-text files only, up to 50 KB. No scanned/PDF parsing is claimed. Unreadable content is never guessed; AI output remains a proposal until an officer verifies it.</p>
+  const generated = briefing && briefing.status !== 'NOT_GENERATED'
+
+  return <Panel id="briefing-title" en="Document briefing" bn="নথির সারসংক্ষেপ" hint={generated ? say(briefing.status) : bi('Not generated', 'তৈরি হয়নি')}>
+    <p className="muted"><Bi en="Plain-text files only (50 KB). AI drafts, you verify. Unreadable text is never guessed." bn="শুধু টেক্সট ফাইল (৫০ কেবি)। এআই খসড়া করে, যাচাই আপনার। অপাঠযোগ্য লেখা অনুমান করা হয় না।" /></p>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
-    <p>{documents.length} document record{documents.length === 1 ? '' : 's'} on this Application. Case type: {caseType || 'not recorded'}.</p>
-    {caseType && <p>Checklist: {checklist[caseType]?.join(' · ')}</p>}
-    {caseType === 'LAND' && <button type="button" className="secondary-button" onClick={uploadSamples} disabled={busy || documents.some(({ label }) => label === 'identity note')}>Upload six fictional sample documents</button>}
-    <form onSubmit={uploadSelected} className="form-stack inline-form">
-      <h3>Upload fictional text</h3>
-      <label htmlFor="document-files">Text files</label><input id="document-files" name="documentFiles" type="file" accept=".txt,text/plain" multiple onChange={(event) => setFiles(Array.from(event.target.files))} required />
-      <label htmlFor="document-checklist">Checklist item</label><select id="document-checklist" name="checklistItem" autoComplete="off" value={checklistItem} onChange={(event) => setChecklistItem(event.target.value)}><option>Other context</option>{(checklist[caseType] || []).map((item) => <option key={item}>{item}</option>)}</select>
-      <label htmlFor="document-quality">Quality</label><select id="document-quality" name="qualityState" autoComplete="off" value={qualityState} onChange={(event) => setQualityState(event.target.value)}><option value="PENDING_REVIEW">Pending review</option><option value="READABLE">Readable</option><option value="UNREADABLE">Unreadable / uncertain</option></select>
-      <button type="submit" className="secondary-button" disabled={busy || files.length === 0}>Upload selected files</button>
-    </form>
-    <button type="button" onClick={generate} disabled={busy || !caseType}>Generate provisional briefing</button>
-    {briefing && briefing.status !== 'NOT_GENERATED' && <div className="version-history">
-      <h3>Briefing: {briefing.status.toLowerCase()}</h3><p>Source: {briefing.model}. {briefing.summary}</p>
-      <h3>Source references</h3>{briefing.citations.length ? <ol>{briefing.citations.map((citation) => <li key={`${citation.documentVersionId}-${citation.line}`}><strong>{citation.label}, line {citation.line}</strong> · {citation.excerpt}</li>)}</ol> : <p>No readable source lines.</p>}
-      <h3>Missing checklist items</h3><p>{briefing.missing.join(' · ') || 'None recorded'}</p>
-      <h3>Unreadable or uncertain</h3><p>{briefing.unreadable.join(' · ') || 'None recorded'}</p>
-      {briefing.status === 'PROPOSED' && <form onSubmit={approve} className="form-stack inline-form"><label htmlFor="briefing-reason">Officer verification reason</label><textarea id="briefing-reason" name="briefingReason" autoComplete="off" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} minLength="10" maxLength="500" required /><button type="submit" disabled={busy}>Approve briefing accuracy only</button></form>}
+    <dl className="details compact">
+      <div><dt><Bi en="Case type" bn="মামলার ধরন" /></dt><dd>{caseType ? <Term code={caseType} /> : bi('Not recorded', 'লেখা নেই')}</dd></div>
+      <div><dt><Bi en="Files" bn="ফাইল" /></dt><dd>{num(documents.length)}</dd></div>
+      {caseType && <div><dt><Bi en="Checklist" bn="তালিকা" /></dt><dd><ul className="chips">{checklist[caseType]?.map((name) => <li key={name} className={briefing?.missing?.includes(name) ? 'missing' : undefined}>{item(name)}</li>)}</ul></dd></div>}
+    </dl>
+    <div className="choice-row">
+      <button type="button" onClick={generate} disabled={busy || !caseType}><Bi en="Generate briefing" bn="সারসংক্ষেপ তৈরি করুন" /></button>
+      {caseType === 'LAND' && <button type="button" className="secondary-button" onClick={uploadSamples} disabled={busy || documents.some(({ label }) => label === 'identity note')}><Bi en="Upload six fictional sample documents" bn="ছয়টি নমুনা নথি আপলোড" /></button>}
+    </div>
+    <AddForm en="Upload text files" bn="টেক্সট ফাইল আপলোড">
+      <form onSubmit={uploadSelected} className="form-stack inline-form">
+        <label htmlFor="document-files"><Bi en="Text files" bn="টেক্সট ফাইল" /></label><input id="document-files" name="documentFiles" type="file" accept=".txt,text/plain" multiple onChange={(event) => setFiles(Array.from(event.target.files))} required />
+        <label htmlFor="document-checklist"><Bi en="Checklist item" bn="তালিকার বিষয়" /></label><select id="document-checklist" name="checklistItem" autoComplete="off" value={checklistItem} onChange={(event) => setChecklistItem(event.target.value)}>{['Other context', ...(checklist[caseType] || [])].map((name) => <option key={name} value={name}>{itemNames[name] ? bi(name, itemNames[name]) : name}</option>)}</select>
+        <label htmlFor="document-quality"><Bi en="Quality" bn="মান" /></label><select id="document-quality" name="qualityState" autoComplete="off" value={qualityState} onChange={(event) => setQualityState(event.target.value)}>{['PENDING_REVIEW', 'READABLE', 'UNREADABLE'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+        <button type="submit" className="secondary-button" disabled={busy || files.length === 0}><Bi en="Upload" bn="আপলোড" /></button>
+      </form>
+    </AddForm>
+    {generated && <div className="version-history">
+      <h3><Bi en="Briefing" bn="সারসংক্ষেপ" /> <Badge code={briefing.status} /></h3>
+      <p>{briefing.summary} <small className="muted">({briefing.model})</small></p>
+      <h3><Bi en="Sources" bn="উৎস" /></h3>{briefing.citations.length ? <ol>{briefing.citations.map((citation) => <li key={`${citation.documentVersionId}-${citation.line}`}><strong>{bi(`${citation.label}, line ${citation.line}`, `${citation.label}, লাইন ${num(citation.line)}`)}</strong> · {citation.excerpt}</li>)}</ol> : <p><Bi en="No readable lines." bn="পড়ার মতো কোনো লাইন নেই।" /></p>}
+      <h3><Bi en="Missing" bn="যা নেই" /></h3><p>{briefing.missing.length ? briefing.missing.map((name, index) => <span key={name}>{index ? ' · ' : ''}{item(name)}</span>) : bi('Nothing', 'কিছু না')}</p>
+      <h3><Bi en="Unreadable or uncertain" bn="অপাঠযোগ্য বা অনিশ্চিত" /></h3><p>{briefing.unreadable.join(' · ') || bi('Nothing', 'কিছু না')}</p>
+      {briefing.status === 'PROPOSED' && <form onSubmit={approve} className="form-stack inline-form"><label htmlFor="briefing-reason"><Bi en="Officer verification reason" bn="যাচাইয়ের কারণ" /></label><textarea id="briefing-reason" name="briefingReason" autoComplete="off" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} minLength="10" maxLength="500" required /><button type="submit" disabled={busy}><Bi en="Approve briefing accuracy only" bn="শুধু নির্ভুলতা অনুমোদন" /></button></form>}
     </div>}
-  </section>
+  </Panel>
 }

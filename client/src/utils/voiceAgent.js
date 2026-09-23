@@ -1,7 +1,9 @@
-import { activeFields, answer, steps } from './voiceScript.js'
+import { answer, nextField, steps } from './voiceScript.js'
 
 // Boundary between the AI and the intake draft. Whatever the model extracted from the caller's speech is
-// checked here against the same script the keyboard uses: only questions already asked and only allowed values.
+// checked here against the same script the keyboard uses: only the question being asked and only allowed values.
+// So a later question is never skipped, and an earlier answer (a keypad choice included) is never overwritten or
+// given this clip; earlier answers change only through a correction, which makes that question current again.
 // The server validates the whole payload again before anything is saved.
 const toolCode = (value) => (value === true ? 'YES' : value === false ? 'NO' : value)
 const asciiDigits = (text) => text.replace(/[০-৯]/g, (digit) => '০১২৩৪৫৬৭৮৯'.indexOf(digit))
@@ -22,7 +24,7 @@ export function parseAnswer(field, raw) {
 export function applyExtraction(call, values) {
   const accepted = []
   const next = Object.entries(values ?? {}).reduce((draft, [field, raw]) => {
-    if (!activeFields(draft).includes(field)) return draft
+    if (field !== nextField(draft)) return draft
     const value = parseAnswer(field, raw)
     if (value === undefined) return draft
     accepted.push(field)

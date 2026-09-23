@@ -38,7 +38,7 @@ test('Step 12: two parties sign asynchronously, one offline packet syncs, and ed
 
   await signIn(page, 'MEDIATOR')
   await page.getByRole('link', { name: new RegExp(applicationId) }).click()
-  await expect(page.getByRole('heading', { name: 'Asynchronous signatures' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /^Signatures/ })).toBeVisible()
   await page.getByLabel('Local passphrase for encrypted offline signature packets').fill('FictionalSignSecret!')
   const signatureRequests = []
   page.on('request', (outgoing) => {

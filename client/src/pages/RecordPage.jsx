@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, apiUrl } from '../services/api.js'
+import { AddForm, Badge, Bi, Panel, Term, bi, num, say, tr, when } from '../components/Bi.jsx'
 import DocumentReview from './DocumentReview.jsx'
 import ReferralPanel from './ReferralPanel.jsx'
 import LawyerManagement from './LawyerManagement.jsx'
@@ -9,8 +10,8 @@ import RelatedIncidentPanel from './RelatedIncidentPanel.jsx'
 import TriagePanel from './TriagePanel.jsx'
 import MediationPanel from './MediationPanel.jsx'
 
-const showDate = (value) => value ? new Date(value).toLocaleString() : 'Not set'
-const channels = { VOICE_SIM: '16699 voice simulation', HELPLINE_SIM: 'Helpline agent (simulated 16699)', UDC: 'UDC assisted', DLAO: 'DLAO office', WEB: 'Web' }
+const none = () => bi('None', 'নেই')
+const yesNo = (value) => value ? bi('Yes', 'হ্যাঁ') : bi('No', 'না')
 
 // Officer-only playback of the full 16699 call. Fetched with the session token, which a bare <audio src> cannot send.
 function CallRecording({ applicationId, token }) {
@@ -25,15 +26,19 @@ function CallRecording({ applicationId, token }) {
       .catch((failure) => { if (failure?.name !== 'AbortError') setState(failure === 404 ? 'NONE' : 'FAILED') })
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [applicationId, token])
-  return (
-    <section className="card" aria-labelledby="recording-title">
-      <h2 id="recording-title">Call recording</h2>
-      {state === 'READY'
-        ? <audio controls preload="metadata" src={url} aria-label="Full call recording" />
-        : <p className="muted">{{ LOADING: 'Loading the recording…', NONE: 'No call recording is stored for this application.', FAILED: 'The recording could not be loaded. Refresh to try again.' }[state]}</p>}
-      <p className="muted">The greeting tells every caller the call is recorded; no opt-out is offered (project decision 2026-09-23, pending law-team review). Confirmed facts are listed separately.</p>
-    </section>
-  )
+  return state === 'READY'
+    ? <audio controls preload="metadata" src={url} aria-label={bi('Full call recording', 'পুরো কলের রেকর্ড')} />
+    : <p className="muted">{{ LOADING: bi('Loading recording…', 'রেকর্ড লোড হচ্ছে…'), NONE: bi('No recording stored.', 'কোনো রেকর্ড নেই।'), FAILED: bi('Recording could not load. Refresh to retry.', 'রেকর্ড লোড হয়নি। আবার চেষ্টা করুন।') }[state]}</p>
+}
+
+// Submitted → reviewed → accepted, as one glanceable bar.
+function Progress({ record }) {
+  const reviewed = record.status === 'ACCEPTED' || record.reviewState === 'READY_FOR_DECISION'
+  const steps = [['Submitted', 'জমা', true], ['Reviewed', 'পর্যালোচিত', reviewed], ['Accepted', 'গৃহীত', record.status === 'ACCEPTED']]
+  const current = steps.findIndex(([, , done]) => !done)
+  return <ol className="journey" aria-label={bi('Progress', 'অগ্রগতি')}>
+    {steps.map(([en, bn, done], index) => <li key={en} className={done ? 'done' : undefined} aria-current={index === current ? 'step' : undefined}><Bi en={en} bn={bn} /></li>)}
+  </ol>
 }
 
 export default function RecordPage({ session }) {
@@ -99,32 +104,33 @@ export default function RecordPage({ session }) {
   async function submitReview(event) {
     event.preventDefault()
     const override = reviewState === 'PENDING_REVIEW' || data.record.reviewState === 'READY_FOR_DECISION'
-    const result = await change(`/api/applications/${applicationId}/${override ? 'review-override' : 'review'}`, { reviewState, reason: reviewReason }, override ? 'Human override recorded.' : 'Review recorded.')
+    const result = await change(`/api/applications/${applicationId}/${override ? 'review-override' : 'review'}`, { reviewState, reason: reviewReason }, override ? bi('Override saved.', 'পরিবর্তন সংরক্ষিত।') : bi('Review saved.', 'পর্যালোচনা সংরক্ষিত।'))
     if (result) setReviewReason('')
   }
 
   async function submitAcceptance(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason }, 'Application accepted. A Case ID was created.')
+    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason }, bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
     if (result) setAcceptReason('')
   }
 
   async function submitPriority(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, 'Human priority override recorded in the audit timeline.')
+    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
     if (result) setPriorityReason('')
   }
 
   async function submitTask(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/tasks`, { title: taskTitle, ownerRole: taskRole, nextAction: taskAction }, 'Task added to this record.')
+    const result = await change(`/api/applications/${applicationId}/tasks`, { title: taskTitle, ownerRole: taskRole, nextAction: taskAction }, bi('Task added.', 'কাজ যোগ হয়েছে।'))
     if (result) { setTaskTitle(''); setTaskAction('') }
   }
 
   async function submitDocument(event) {
     event.preventDefault()
     const path = selectedDocument ? `/api/documents/${selectedDocument.id}/versions` : `/api/applications/${applicationId}/documents`
-    const result = await change(path, { label: docLabel, qualityState: docQuality, ...(docNote ? { note: docNote } : {}), ...(!selectedDocument && docRestricted ? { sensitivity: 'RESTRICTED' } : {}) }, selectedDocument ? 'Document version added.' : docRestricted ? 'Restricted evidence recorded. Only you hold an access grant.' : 'Document metadata added.')
+    const result = await change(path, { label: docLabel, qualityState: docQuality, ...(docNote ? { note: docNote } : {}), ...(!selectedDocument && docRestricted ? { sensitivity: 'RESTRICTED' } : {}) },
+      selectedDocument ? bi('New version added.', 'নতুন সংস্করণ যোগ হয়েছে।') : docRestricted ? bi('Restricted evidence recorded. Only you can open it.', 'সীমিত প্রমাণ যোগ হয়েছে। শুধু আপনি খুলতে পারবেন।') : bi('Document added.', 'নথি যোগ হয়েছে।'))
     if (result) {
       setDocLabel('')
       setDocNote('')
@@ -144,162 +150,192 @@ export default function RecordPage({ session }) {
 
   async function submitContact(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: contactChannel, outcome: contactOutcome, reason: contactReason }, 'Contact history recorded. No message or call was sent by the system.')
+    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: contactChannel, outcome: contactOutcome, reason: contactReason }, bi('Contact attempt logged. Nothing was sent.', 'যোগাযোগের চেষ্টা লেখা হয়েছে। কিছু পাঠানো হয়নি।'))
     if (result) setContactReason('')
   }
 
   async function simulateUnknownAnswer() {
-    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call to the safe number: an unknown person answered.' }, 'Failed safe: nothing was disclosed and a safer follow-up task was created.')
+    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call to the safe number: an unknown person answered.' }, bi('Nothing was disclosed. A safer follow-up task was created.', 'কিছু বলা হয়নি। নিরাপদ ফলো-আপের কাজ তৈরি হয়েছে।'))
     if (result) setNeutralScript(result.neutralScript)
   }
 
+  const record = data?.record
+  const ready = !loading && record?.applicationId === applicationId
+  const openTasks = data?.tasks.filter(({ status }) => status === 'OPEN').length ?? 0
+  const events = officer ? data?.audit?.events : data?.history.events
+  const integrity = officer ? data?.audit?.valid : data?.history.valid
+
   return (
     <section aria-labelledby="record-title">
-      <Link to="/">← Workspace</Link>
-      <p className="eyebrow">Shared application record</p>
-      <h1 id="record-title">{applicationId}</h1>
+      <Link to="/">← <Bi en="Workspace" bn="কর্মক্ষেত্র" /></Link>
+      <div className="record-head">
+        <div>
+          <p className="eyebrow"><Bi en="Application" bn="আবেদন" /></p>
+          <h1 id="record-title">{applicationId}</h1>
+          {ready && <p className="record-sub">{tr(record.applicantName)} · <Term code={record.channel} /></p>}
+        </div>
+        {ready && <Badge code={record.status} />}
+      </div>
       {error && <p role="alert" className="error">{error}</p>}
       {notice && <p role="status" className="success">{notice}</p>}
-      {loading && <p role="status">Loading record…</p>}
-      {!loading && data?.record.applicationId === applicationId && <>
+      {loading && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
+      {ready && <>
+        <Progress record={record} />
+        <p className="safety-note next-step"><strong><Bi en="Next step" bn="পরবর্তী ধাপ" /></strong> {tr(record.nextTask?.nextAction) || bi('No open task', 'কোনো চলমান কাজ নেই')}{record.nextTask && <small> · <Term code={record.nextTask.ownerRole} /></small>}</p>
+
         <div className="summary-grid">
           <section className="card" aria-labelledby="summary-title">
-            <h2 id="summary-title">Application</h2>
-            <dl className="details">
-              <div><dt>Applicant</dt><dd>{data.record.applicantName}</dd></div>
-              <div><dt>Channel</dt><dd>{channels[data.record.channel] || data.record.channel}</dd></div>
-              <div><dt>Reported by</dt><dd>{data.record.representation ? `${data.record.representation.representativeName} · ${data.record.representation.relationship} · authority ${data.record.representation.authorityStatus}` : 'No representative recorded'}</dd></div>
-              <div><dt>Status</dt><dd><span className="badge">{data.record.status}</span></dd></div>
-              <div><dt>Review</dt><dd>{data.record.reviewState?.replaceAll('_', ' ')}</dd></div>
-              <div><dt>Human priority</dt><dd>{data.record.priorityDecision || 'Not recorded'}</dd></div>
-              <div><dt>Identity</dt><dd>{data.record.identityStatus} · legal requirements pending verification</dd></div>
-              <div><dt>Case ID</dt><dd>{data.record.caseId || 'Not created before acceptance'}</dd></div>
-              <div><dt>Next action</dt><dd>{data.record.nextTask?.nextAction || 'No open task'}</dd></div>
-              <div><dt>Owner</dt><dd>{data.record.nextTask?.ownerRole?.replaceAll('_', ' ') || 'Not assigned'}</dd></div>
+            <h2 id="summary-title"><Bi en="At a glance" bn="এক নজরে" /></h2>
+            <dl className="facts">
+              <div><dt><Bi en="Review" bn="পর্যালোচনা" /></dt><dd><Term code={record.reviewState} /></dd></div>
+              <div><dt><Bi en="Priority" bn="অগ্রাধিকার" /></dt><dd>{record.priorityDecision ? <Term code={record.priorityDecision} /> : bi('Not set', 'নির্ধারিত নয়')}</dd></div>
+              <div><dt><Bi en="Case ID" bn="মামলা নম্বর" /></dt><dd>{record.caseId || bi('After acceptance', 'গ্রহণের পরে')}</dd></div>
+              <div><dt><Bi en="Identity" bn="পরিচয়" /></dt><dd><Term code={record.identityStatus} /></dd></div>
+              {record.representation && <div className="wide"><dt><Bi en="Reported by" bn="জানিয়েছেন" /></dt><dd>{record.representation.representativeName} · {record.representation.relationship} · <Bi en="authority" bn="অনুমতি" /> <Term code={record.representation.authorityStatus} /></dd></div>}
             </dl>
           </section>
           {officer && <section className="card safety-card" aria-labelledby="safe-title">
-            <h2 id="safe-title">Safe contact</h2>
-            {!data.safeContact ? <p>No safe-contact profile is recorded. Do not disclose or send case details through an unverified route.</p> : <dl className="details">
-              <div><dt>Profile version</dt><dd>{data.safeContact.version}</dd></div>
-              <div><dt>Allowed</dt><dd>{data.safeContact.allowedChannels.join(', ') || 'None'}</dd></div>
-              <div><dt>Prohibited</dt><dd>{data.safeContact.prohibitedChannels.join(', ') || 'None'}</dd></div>
-              <div><dt>Safe time</dt><dd>{data.safeContact.safeTimeWindow || 'Not recorded'}</dd></div>
-              <div><dt>Unknown answer</dt><dd>{data.safeContact.unknownAnswerAction.replaceAll('_', ' ')}</dd></div>
+            <h2 id="safe-title"><Bi en="Safe contact" bn="নিরাপদ যোগাযোগ" /></h2>
+            {!data.safeContact ? <p><Bi en="No safe route recorded. Do not contact or share details." bn="নিরাপদ পথ লেখা নেই। যোগাযোগ করবেন না, কিছু জানাবেন না।" /></p> : <dl className="details compact">
+              <div><dt><Bi en="Use" bn="ব্যবহার করুন" /></dt><dd>{data.safeContact.allowedChannels.map(say).join(', ') || none()}</dd></div>
+              <div><dt><Bi en="Never use" bn="কখনো নয়" /></dt><dd>{data.safeContact.prohibitedChannels.map(say).join(', ') || none()}</dd></div>
+              <div><dt><Bi en="Safe time" bn="নিরাপদ সময়" /></dt><dd>{data.safeContact.safeTimeWindow || bi('Not recorded', 'লেখা নেই')}</dd></div>
+              <div><dt><Bi en="If someone else answers" bn="অন্য কেউ ধরলে" /></dt><dd><Term code={data.safeContact.unknownAnswerAction} /></dd></div>
             </dl>}
-            <p className="muted">This page logs contact history only; it never sends a message or places a call.</p>
-            {data.safeContact?.allowedChannels.includes('PHONE') && <button type="button" className="secondary-button" onClick={simulateUnknownAnswer}>Simulate call: unknown person answers</button>}
-            {neutralScript && <figure className="script-box" aria-label="Neutral script"><figcaption>Say only this (placeholder pending law-team approval):</figcaption><blockquote>{neutralScript}</blockquote></figure>}
+            {data.safeContact?.allowedChannels.includes('PHONE') && <button type="button" className="secondary-button" onClick={simulateUnknownAnswer}><Bi en="Simulate call: unknown person answers" bn="পরীক্ষা: অন্য কেউ ধরেছে" /></button>}
+            {neutralScript && <figure className="script-box" aria-label={bi('Neutral script', 'নিরপেক্ষ কথা')}><figcaption><Bi en="Say only this:" bn="শুধু এটুকু বলুন:" /></figcaption><blockquote>{tr(neutralScript)}</blockquote></figure>}
           </section>}
         </div>
 
-        {data.record.assistance && <section className="card" aria-labelledby="assistance-title"><h2 id="assistance-title">Assisted-intake provenance</h2><dl className="details">
-          <div><dt>Helper</dt><dd>{data.record.assistance.helperName}</dd></div>
-          <div><dt>Translator</dt><dd>{data.record.assistance.translatorName}</dd></div>
-          <div><dt>Typist</dt><dd>{data.record.assistance.typistName}</dd></div>
-          <div><dt>Original language</dt><dd>{data.record.assistance.originalLanguage}</dd></div>
-          <div><dt>Case type</dt><dd>{data.record.assistance.caseType}</dd></div>
-          <div><dt>Assisted consent</dt><dd>{data.record.assistance.consentState} (oral attestation; legal review pending)</dd></div>
-          <div><dt>Original statement confirmed</dt><dd>{data.record.assistance.originalConfirmed ? 'yes' : 'pending'}</dd></div>
-          <div><dt>Translation confirmed</dt><dd>{data.record.assistance.translationConfirmed ? 'yes' : 'pending'}</dd></div>
-        </dl><p className="muted">The original account and translated text remain distinct facts. The helper phone is not treated as applicant contact.</p></section>}
+        <div className="card panels">
+          {officer && record.status === 'SUBMITTED' && <Panel id="decision-title" en="Decision" bn="সিদ্ধান্ত" hint={say(record.reviewState)} open>
+            <p className="muted"><Bi en="1. Review, then 2. accept. Review is not proof of identity." bn="১. পর্যালোচনা, তারপর ২. গ্রহণ। পর্যালোচনা পরিচয়ের প্রমাণ নয়।" /></p>
+            <div className="action-grid">
+              <form onSubmit={submitReview} className="form-stack">
+                <h3><Bi en="1. Review" bn="১. পর্যালোচনা" /></h3>
+                <label htmlFor="review-state"><Bi en="Review outcome" bn="পর্যালোচনার ফল" /></label>
+                <select id="review-state" value={reviewState} onChange={(event) => setReviewState(event.target.value)}>
+                  <option value="READY_FOR_DECISION">{say('READY_FOR_DECISION')}</option>
+                  <option value="NEEDS_INFORMATION">{say('NEEDS_INFORMATION')}</option>
+                  {record.reviewState !== 'PENDING_REVIEW' && <option value="PENDING_REVIEW">{bi('Back to pending review', 'আবার পর্যালোচনায় ফেরত')}</option>}
+                </select>
+                <label htmlFor="review-reason"><Bi en="Reason" bn="কারণ" /></label>
+                <textarea id="review-reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} minLength="10" maxLength="1000" required />
+                <button type="submit">{reviewState === 'PENDING_REVIEW' || record.reviewState === 'READY_FOR_DECISION' ? <Bi en="Record override" bn="পরিবর্তন সংরক্ষণ" /> : <Bi en="Record review" bn="পর্যালোচনা সংরক্ষণ" />}</button>
+              </form>
+              <form onSubmit={submitAcceptance} className="form-stack">
+                <h3><Bi en="2. Accept" bn="২. গ্রহণ" /></h3>
+                <label htmlFor="accept-reason"><Bi en="Decision reason" bn="সিদ্ধান্তের কারণ" /></label>
+                <textarea id="accept-reason" value={acceptReason} onChange={(event) => setAcceptReason(event.target.value)} minLength="10" maxLength="1000" required />
+                <button type="submit" disabled={record.reviewState !== 'READY_FOR_DECISION'}><Bi en="Accept application" bn="আবেদন গ্রহণ করুন" /></button>
+              </form>
+            </div>
+          </Panel>}
 
-        {officer && <section className="card" aria-labelledby="priority-title"><h2 id="priority-title">Human priority override</h2><p className="muted">Queue urgency is a rules-based recommendation (criteria pending legal verification). An officer decides whether to prioritize; this does not decide legal eligibility.</p>{data.record.urgencyReasons.length ? <><h3>Urgency recommendation reasons</h3><ul>{data.record.urgencyReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></> : <p>No urgency indicators are recorded.</p>}<form onSubmit={submitPriority} className="form-stack inline-form"><label htmlFor="priority-decision">Priority decision</label><select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}><option value="URGENT">Prioritize urgently</option><option value="ROUTINE">Handle routinely</option></select><label htmlFor="priority-reason">Override reason</label><textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required /><button type="submit">Record priority override</button></form></section>}
+          <Panel id="tasks-title" en="Tasks" bn="কাজ" hint={openTasks ? bi(`${openTasks} open`, `${num(openTasks)}টি চলমান`) : bi('All done', 'সব সম্পন্ন')} open>
+            {data.tasks.length === 0 && <p className="muted">{none()}</p>}
+            <ul className="plain-list">{data.tasks.map((task) => <li key={task._id}><div><strong><Term code={task.title} /></strong> <Badge code={task.status} /><p>{tr(task.nextAction)}</p><small><Term code={task.ownerRole} />{task.dueAt && <> · <Bi en="Due" bn="শেষ সময়" /> {when(task.dueAt)}</>}</small></div>{task.kind === 'MANUAL' && task.status === 'OPEN' && <button type="button" className="secondary-button" onClick={() => change(`/api/applications/${applicationId}/tasks/${task._id}/complete`, undefined, bi('Task completed.', 'কাজ সম্পন্ন।'))}><Bi en="Complete" bn="সম্পন্ন" /></button>}</li>)}</ul>
+            <AddForm en="Add task" bn="কাজ যোগ করুন">
+              <form onSubmit={submitTask} className="form-stack inline-form">
+                <label htmlFor="task-title"><Bi en="Task title" bn="কাজের নাম" /></label><input id="task-title" value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} minLength="3" maxLength="120" required />
+                <label htmlFor="task-owner"><Bi en="Owner" bn="দায়িত্বে" /></label><select id="task-owner" value={taskRole} onChange={(event) => setTaskRole(event.target.value)}>{['DLAO_OFFICER', 'CASE_SUPPORT', 'MEDIATOR', 'RECEIVING_DLAO'].map((role) => <option key={role} value={role}>{say(role)}</option>)}</select>
+                <label htmlFor="task-action"><Bi en="Next action" bn="পরবর্তী কাজ" /></label><input id="task-action" value={taskAction} onChange={(event) => setTaskAction(event.target.value)} minLength="5" maxLength="300" required />
+                <button type="submit" className="secondary-button"><Bi en="Add task" bn="কাজ যোগ করুন" /></button>
+              </form>
+            </AddForm>
+          </Panel>
 
-        {!officer && <section className="card" aria-labelledby="history-title"><h2 id="history-title">Case reconstruction</h2><p className="muted">Action history without private reasons or fact text. Contact and task history on this page belong to the same record.</p><p>Audit integrity: {data.history.valid ? 'valid under demo assumptions' : 'check required'}</p><ol className="timeline">{data.history.events.map((event, index) => <li key={index}><strong>{event.action.replaceAll('_', ' ')}</strong><small> {event.actorRole.replaceAll('_', ' ')} · <time dateTime={event.createdAt}>{showDate(event.createdAt)}</time></small></li>)}</ol></section>}
-
-        {officer && data.record.status === 'SUBMITTED' && <section className="card" aria-labelledby="decision-title">
-          <h2 id="decision-title">Human review and acceptance</h2>
-          <p className="muted">Review is a human workflow state, not proof of legal identity or eligibility.</p>
-          <div className="action-grid">
-            <form onSubmit={submitReview} className="form-stack">
-              <label htmlFor="review-state">Review outcome</label>
-              <select id="review-state" value={reviewState} onChange={(event) => setReviewState(event.target.value)}>
-                <option value="READY_FOR_DECISION">Ready for officer decision</option>
-                <option value="NEEDS_INFORMATION">Needs information</option>
-                {data.record.reviewState !== 'PENDING_REVIEW' && <option value="PENDING_REVIEW">Return to pending review (override)</option>}
-              </select>
-              <label htmlFor="review-reason">Reason</label>
-              <textarea id="review-reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} minLength="10" maxLength="1000" required />
-              <button type="submit">{reviewState === 'PENDING_REVIEW' || data.record.reviewState === 'READY_FOR_DECISION' ? 'Record human override' : 'Record review'}</button>
+          {officer && <Panel id="priority-title" en="Priority" bn="অগ্রাধিকার" hint={record.priorityDecision ? say(record.priorityDecision) : record.urgencyReasons.length ? bi('Flagged, decide', 'চিহ্নিত, সিদ্ধান্ত দিন') : bi('Not set', 'নির্ধারিত নয়')} open={record.urgencyReasons.length > 0 && !record.priorityDecision}>
+            <p className="muted"><Bi en="The system flags. You decide." bn="সিস্টেম চিহ্নিত করে, সিদ্ধান্ত আপনার।" /></p>
+            {record.urgencyReasons.length ? <><h3><Bi en="Why flagged" bn="কেন চিহ্নিত" /></h3><ul>{record.urgencyReasons.map((reason) => <li key={reason}>{tr(reason)}</li>)}</ul></> : <p><Bi en="No urgency signs recorded." bn="জরুরি কোনো লক্ষণ লেখা নেই।" /></p>}
+            <form onSubmit={submitPriority} className="form-stack inline-form">
+              <label htmlFor="priority-decision"><Bi en="Priority decision" bn="অগ্রাধিকারের সিদ্ধান্ত" /></label><select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}><option value="URGENT">{say('URGENT')}</option><option value="ROUTINE">{say('ROUTINE')}</option></select>
+              <label htmlFor="priority-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required />
+              <button type="submit"><Bi en="Save priority" bn="অগ্রাধিকার সংরক্ষণ" /></button>
             </form>
-            <form onSubmit={submitAcceptance} className="form-stack">
-              <h3>Accept into case workflow</h3>
-              <p className="muted">Only an authorised officer can create the Case ID after review.</p>
-              <label htmlFor="accept-reason">Decision reason</label>
-              <textarea id="accept-reason" value={acceptReason} onChange={(event) => setAcceptReason(event.target.value)} minLength="10" maxLength="1000" required />
-              <button type="submit" disabled={data.record.reviewState !== 'READY_FOR_DECISION'}>Accept application</button>
-            </form>
-          </div>
-        </section>}
+          </Panel>}
 
-        <section className="card" aria-labelledby="tasks-title">
-          <h2 id="tasks-title">Tasks and next actions</h2>
-          <ul className="plain-list">{data.tasks.map((task) => <li key={task._id}><div><strong>{task.title}</strong> <span className="badge">{task.status}</span><p>{task.nextAction}</p><small>Owner: {task.ownerRole.replaceAll('_', ' ')} · Due: {showDate(task.dueAt)}</small></div>{task.kind === 'MANUAL' && task.status === 'OPEN' && <button type="button" className="secondary-button" onClick={() => change(`/api/applications/${applicationId}/tasks/${task._id}/complete`, undefined, 'Task completed.')}>Complete</button>}</li>)}</ul>
-          <form onSubmit={submitTask} className="form-stack inline-form">
-            <h3>Add a task</h3>
-            <label htmlFor="task-title">Task title</label><input id="task-title" value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} minLength="3" maxLength="120" required />
-            <label htmlFor="task-owner">Owner role</label><select id="task-owner" value={taskRole} onChange={(event) => setTaskRole(event.target.value)}><option value="DLAO_OFFICER">DLAO officer</option><option value="CASE_SUPPORT">Case support</option><option value="MEDIATOR">Mediator</option><option value="RECEIVING_DLAO">Receiving DLAO</option></select>
-            <label htmlFor="task-action">Next action</label><input id="task-action" value={taskAction} onChange={(event) => setTaskAction(event.target.value)} minLength="5" maxLength="300" required />
-            <button type="submit" className="secondary-button">Add task</button>
-          </form>
-        </section>
+          {record.assistance && <Panel id="assistance-title" en="Assisted intake" bn="সহায়তায় আবেদন" hint={say(record.assistance.caseType)}>
+            <dl className="details compact">
+              <div><dt><Bi en="Helper" bn="সহায়তাকারী" /></dt><dd>{record.assistance.helperName}</dd></div>
+              <div><dt><Bi en="Translator" bn="অনুবাদক" /></dt><dd>{record.assistance.translatorName}</dd></div>
+              <div><dt><Bi en="Typist" bn="টাইপিস্ট" /></dt><dd>{record.assistance.typistName}</dd></div>
+              <div><dt><Bi en="Original language" bn="মূল ভাষা" /></dt><dd>{record.assistance.originalLanguage}</dd></div>
+              <div><dt><Bi en="Case type" bn="মামলার ধরন" /></dt><dd><Term code={record.assistance.caseType} /></dd></div>
+              <div><dt><Bi en="Consent (oral)" bn="সম্মতি (মৌখিক)" /></dt><dd><Term code={record.assistance.consentState} /></dd></div>
+              <div><dt><Bi en="Statement confirmed" bn="বক্তব্য নিশ্চিত" /></dt><dd>{yesNo(record.assistance.originalConfirmed)}</dd></div>
+              <div><dt><Bi en="Translation confirmed" bn="অনুবাদ নিশ্চিত" /></dt><dd>{yesNo(record.assistance.translationConfirmed)}</dd></div>
+            </dl>
+            <p className="muted"><Bi en="Original and translation are kept apart. The helper's phone is not the applicant's." bn="মূল বক্তব্য ও অনুবাদ আলাদা রাখা হয়। সহায়তাকারীর ফোন আবেদনকারীর নয়।" /></p>
+          </Panel>}
 
-        {officer && data.record.status === 'ACCEPTED' && <LawyerManagement applicationId={applicationId} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
-        {officer && data.record.status === 'ACCEPTED' && <TriagePanel applicationId={applicationId} token={session.token} />}
-        {officer && data.record.status === 'ACCEPTED' && <RelatedIncidentPanel applicationId={applicationId} token={session.token} />}
-        {officer && <DuplicateReview applicationId={applicationId} token={session.token} />}
-        {officer && data.record.caseId && <MediationPanel applicationId={applicationId} session={session} role="DLAO_OFFICER" />}
+          {officer && record.status === 'ACCEPTED' && <LawyerManagement applicationId={applicationId} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
+          {officer && record.status === 'ACCEPTED' && <TriagePanel applicationId={applicationId} token={session.token} />}
 
-        <div className="summary-grid">
-          <section className="card" aria-labelledby="docs-title">
-            <h2 id="docs-title">Document metadata</h2>
-            <p className="muted">Metadata is versioned. Fictional text uploads and cited review appear below for assisted applications; unreadable content is never guessed.</p>
-            {data.documents.length === 0 && <p>No metadata recorded.</p>}
-            <ul className="plain-list">{data.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong>{document.sensitivity === 'RESTRICTED' && <> <span className="badge warn-badge">Restricted</span></>}<p>{document.redacted ? 'You hold no access grant; opening is refused and logged.' : `Version ${document.currentVersion}`}</p></div>{!document.redacted && <button type="button" className="secondary-button" onClick={() => selectDocument(document)} aria-label={`Versions of ${document.label}`}>Versions</button>}</li>)}</ul>
-            {selectedDocument && <div className="version-history"><h3>Versions of {selectedDocument.label}</h3><ol>{versions.map((version) => <li key={version.version}>Version {version.version}: {version.label} — {version.qualityState.replaceAll('_', ' ')}{version.note ? ` · ${version.note}` : ''}</li>)}</ol></div>}
-            {officer && <form onSubmit={submitDocument} className="form-stack">
-              <h3>{selectedDocument ? 'Add a metadata version' : 'Add document metadata'}</h3>
-              {selectedDocument && <button type="button" className="text-button" onClick={() => { setSelectedDocument(null); setVersions([]); setDocLabel('') }}>New document instead</button>}
-              <label htmlFor="doc-label">Label</label><input id="doc-label" value={docLabel} onChange={(event) => setDocLabel(event.target.value)} minLength="3" maxLength="160" required />
-              <label htmlFor="doc-quality">Quality state</label><select id="doc-quality" value={docQuality} onChange={(event) => setDocQuality(event.target.value)}><option value="PENDING_REVIEW">Pending review</option><option value="READABLE">Readable metadata</option><option value="UNREADABLE">Unreadable / human verification required</option></select>
-              <label htmlFor="doc-note">Note (optional)</label><textarea id="doc-note" value={docNote} onChange={(event) => setDocNote(event.target.value)} maxLength="500" />
-              {!selectedDocument && <label className="checkbox-label" htmlFor="doc-restricted"><input id="doc-restricted" type="checkbox" checked={docRestricted} onChange={(event) => setDocRestricted(event.target.checked)} />Highly sensitive evidence: restrict to me and explicit authorisations</label>}
-              <button type="submit" className="secondary-button">{selectedDocument ? 'Add version' : 'Add metadata'}</button>
-            </form>}
-            {officer && data.evidenceAccess.length > 0 && <div className="version-history"><h3>Restricted evidence access log</h3><ol>{data.evidenceAccess.map((entry) => <li key={entry.id}>{entry.outcome} · {entry.user} ({entry.roles.join(', ').replaceAll('_', ' ')}) · {entry.document} · basis {entry.basis.replaceAll('_', ' ').toLowerCase()} · <time dateTime={entry.createdAt}>{showDate(entry.createdAt)}</time></li>)}</ol></div>}
-          </section>
-          <section className="card" aria-labelledby="contact-title">
-            <h2 id="contact-title">Contact history</h2>
-            <p className="muted">Recording an attempt does not send a notification or authorise sensitive disclosure.</p>
-            {data.contacts.length === 0 && <p>No attempts recorded.</p>}
-            <ul className="plain-list">{data.contacts.map((attempt) => <li key={attempt._id}><div><strong>{attempt.outcome.replaceAll('_', ' ')}</strong><p>{attempt.channel} · {attempt.reason}</p><small>{showDate(attempt.createdAt)} · Sensitive disclosure: no</small></div></li>)}</ul>
-            {officer && <form onSubmit={submitContact} className="form-stack">
-              <h3>Log an observed attempt</h3>
-              <label htmlFor="contact-channel">Channel</label><select id="contact-channel" value={contactChannel} onChange={(event) => setContactChannel(event.target.value)}><option>PHONE</option><option>SMS</option><option>WEB</option><option>IN_PERSON</option></select>
-              <label htmlFor="contact-outcome">Outcome</label><select id="contact-outcome" value={contactOutcome} onChange={(event) => setContactOutcome(event.target.value)}><option value="BLOCKED_UNSAFE">Blocked unsafe</option><option value="NO_ANSWER">No answer</option><option value="UNKNOWN_PERSON">Unknown person answered</option><option value="APPLICANT_REACHED">Applicant reached</option></select>
-              <label htmlFor="contact-reason">Outcome reason</label><textarea id="contact-reason" value={contactReason} onChange={(event) => setContactReason(event.target.value)} minLength="5" maxLength="500" required />
-              <button type="submit" className="secondary-button">Log attempt</button>
-            </form>}
-          </section>
+          <Panel id="docs-title" en="Documents" bn="নথি" hint={data.documents.length ? bi(`${data.documents.length} on file`, `${num(data.documents.length)}টি আছে`) : none()}>
+            {data.documents.length === 0 && <p className="muted">{none()}</p>}
+            <ul className="plain-list">{data.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong>{document.sensitivity === 'RESTRICTED' && <> <Badge code="RESTRICTED" /></>}<p className="muted">{document.redacted ? <Bi en="No access. Opening is refused and logged." bn="অনুমতি নেই। খোলা যাবে না, চেষ্টা লগ হয়।" /> : <><Bi en="Version" bn="সংস্করণ" /> {num(document.currentVersion)}</>}</p></div>{!document.redacted && <button type="button" className="secondary-button" onClick={() => selectDocument(document)} aria-label={bi(`Versions of ${document.label}`, `${document.label}-এর সংস্করণ`)}><Bi en="Versions" bn="সংস্করণ" /></button>}</li>)}</ul>
+            {selectedDocument && <div className="version-history"><h3><Bi en="Versions" bn="সংস্করণ" />: {selectedDocument.label}</h3><ol>{versions.map((version) => <li key={version.version}>{version.label} · <Term code={version.qualityState} />{version.note ? ` · ${version.note}` : ''}</li>)}</ol></div>}
+            {officer && <AddForm en={selectedDocument ? 'Add a version' : 'Add document'} bn={selectedDocument ? 'সংস্করণ যোগ করুন' : 'নথি যোগ করুন'}>
+              <form onSubmit={submitDocument} className="form-stack inline-form">
+                {selectedDocument && <button type="button" className="text-button" onClick={() => { setSelectedDocument(null); setVersions([]); setDocLabel('') }}><Bi en="New document instead" bn="বরং নতুন নথি" /></button>}
+                <label htmlFor="doc-label"><Bi en="Label" bn="নাম" /></label><input id="doc-label" value={docLabel} onChange={(event) => setDocLabel(event.target.value)} minLength="3" maxLength="160" required />
+                <label htmlFor="doc-quality"><Bi en="Quality" bn="মান" /></label><select id="doc-quality" value={docQuality} onChange={(event) => setDocQuality(event.target.value)}>{['PENDING_REVIEW', 'READABLE', 'UNREADABLE'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+                <label htmlFor="doc-note"><Bi en="Note (optional)" bn="নোট (ঐচ্ছিক)" /></label><textarea id="doc-note" value={docNote} onChange={(event) => setDocNote(event.target.value)} maxLength="500" />
+                {!selectedDocument && <label className="checkbox-label" htmlFor="doc-restricted"><input id="doc-restricted" type="checkbox" checked={docRestricted} onChange={(event) => setDocRestricted(event.target.checked)} /><Bi en="Highly sensitive evidence: only me and people I authorise" bn="অতি সংবেদনশীল প্রমাণ: শুধু আমি ও অনুমোদিতরা" /></label>}
+                <button type="submit" className="secondary-button">{selectedDocument ? <Bi en="Add version" bn="সংস্করণ যোগ করুন" /> : <Bi en="Add document" bn="নথি যোগ করুন" />}</button>
+              </form>
+            </AddForm>}
+            {officer && data.evidenceAccess.length > 0 && <div className="version-history"><h3><Bi en="Restricted access log" bn="সীমিত নথি খোলার লগ" /></h3><ol>{data.evidenceAccess.map((entry) => <li key={entry.id}><Badge code={entry.outcome} /> {entry.user} · {entry.document} · {when(entry.createdAt)}</li>)}</ol></div>}
+          </Panel>
+
+          {officer && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={record.assistance.caseType} documents={data.documents} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
+
+          <Panel id="contact-title" en="Contact log" bn="যোগাযোগের রেকর্ড" hint={data.contacts.length ? bi(`${data.contacts.length} attempts`, `${num(data.contacts.length)} বার চেষ্টা`) : none()}>
+            <p className="muted"><Bi en="A log only. Nothing is sent from here." bn="শুধু রেকর্ড। এখান থেকে কিছু পাঠানো হয় না।" /></p>
+            {data.contacts.length === 0 && <p>{none()}</p>}
+            <ul className="plain-list">{data.contacts.map((attempt) => <li key={attempt._id}><div><Badge code={attempt.outcome} /> <Term code={attempt.channel} /><p>{attempt.reason}</p><small>{when(attempt.createdAt)}</small></div></li>)}</ul>
+            {officer && <AddForm en="Log attempt" bn="চেষ্টা লিখুন">
+              <form onSubmit={submitContact} className="form-stack inline-form">
+                <label htmlFor="contact-channel"><Bi en="Channel" bn="মাধ্যম" /></label><select id="contact-channel" value={contactChannel} onChange={(event) => setContactChannel(event.target.value)}>{['PHONE', 'SMS', 'WEB', 'IN_PERSON'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+                <label htmlFor="contact-outcome"><Bi en="Outcome" bn="ফলাফল" /></label><select id="contact-outcome" value={contactOutcome} onChange={(event) => setContactOutcome(event.target.value)}>{['BLOCKED_UNSAFE', 'NO_ANSWER', 'UNKNOWN_PERSON', 'APPLICANT_REACHED'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+                <label htmlFor="contact-reason"><Bi en="What happened" bn="কী হয়েছে" /></label><textarea id="contact-reason" value={contactReason} onChange={(event) => setContactReason(event.target.value)} minLength="5" maxLength="500" required />
+                <button type="submit" className="secondary-button"><Bi en="Log attempt" bn="চেষ্টা লিখুন" /></button>
+              </form>
+            </AddForm>}
+          </Panel>
+
+          {officer && <ReferralPanel applicationId={applicationId} officeCode={record.officeCode} accepted={record.status === 'ACCEPTED'} referrals={data.referrals} documents={data.documents} token={session.token} change={change} />}
+          {officer && record.caseId && <MediationPanel applicationId={applicationId} session={session} role="DLAO_OFFICER" />}
+          {officer && record.status === 'ACCEPTED' && <RelatedIncidentPanel applicationId={applicationId} token={session.token} />}
+          {officer && <DuplicateReview applicationId={applicationId} token={session.token} />}
+
+          {officer && (record.channel === 'VOICE_SIM' || data.transcript) && <Panel id="call-title" en="Call" bn="কল" hint={data.transcript ? bi('Recording and transcript', 'রেকর্ড ও কথোপকথন') : bi('Recording', 'রেকর্ড')}>
+            {record.channel === 'VOICE_SIM' && <><h3><Bi en="Recording" bn="রেকর্ড" /></h3><CallRecording applicationId={applicationId} token={session.token} /><p className="muted"><Bi en="The caller was told the call is recorded." bn="কলারকে রেকর্ডিংয়ের কথা জানানো হয়েছে।" /></p></>}
+            {data.transcript && <><h3><Bi en="Transcript" bn="কথোপকথন" /></h3>
+              <p className="muted"><Bi en={`Machine transcript (${data.transcript.transcribedBy}), not a legal record.`} bn="যন্ত্রে লেখা, আইনি রেকর্ড নয়।" /></p>
+              <ol className="timeline">{data.transcript.turns.map((line, index) => <li key={index}><strong>{line.speaker === 'CALLER' ? <Bi en="Caller" bn="কলার" /> : <Bi en="Assistant" bn="সহকারী" />}</strong><p lang="bn">{line.text}</p></li>)}</ol>
+            </>}
+          </Panel>}
+
+          {officer && <Panel id="facts-title" en="Facts and sources" bn="তথ্য ও উৎস" hint={data.facts.length ? bi(`${data.facts.length} facts`, `${num(data.facts.length)}টি তথ্য`) : none()}>
+            {data.facts.length === 0 ? <p>{none()}</p> : <div className="table-wrap"><table>
+              <caption className="visually-hidden">{bi('Recorded facts and where each came from', 'লেখা তথ্য ও তার উৎস')}</caption>
+              <thead><tr><th scope="col"><Bi en="Fact" bn="তথ্য" /></th><th scope="col"><Bi en="Value" bn="মান" /></th><th scope="col"><Bi en="Source" bn="উৎস" /></th><th scope="col"><Bi en="Confirmed by" bn="নিশ্চিত করেছেন" /></th></tr></thead>
+              <tbody>{data.facts.map((fact) => <tr key={fact._id}>
+                <th scope="row"><Term code={fact.field} /></th>
+                <td>{tr(say(fact.value))}</td>
+                <td><Term code={fact.sourceType} /><small className="muted"> · <Term code={fact.captureMethod} /> · {bi('r', 'সং')}{num(fact.revision)}{fact.aiInferred ? ` · ${bi('AI', 'এআই')}` : ''}</small></td>
+                <td><Bi en="Caller" bn="কলার" /> {yesNo(fact.callerConfirmed)}<br /><Bi en="Applicant" bn="আবেদনকারী" /> {yesNo(fact.applicantConfirmed)}</td>
+              </tr>)}</tbody>
+            </table></div>}
+          </Panel>}
+
+          <Panel id="history-title" en="History" bn="ইতিহাস" hint={events ? `${bi(`${events.length} events`, `${num(events.length)}টি ঘটনা`)} · ${integrity ? bi('check OK', 'যাচাই ঠিক') : bi('CHECK FAILED', 'যাচাই ব্যর্থ')}` : undefined} open={!officer}>
+            <p className={integrity ? 'muted' : 'error'}>{integrity ? bi('Integrity check passed (demo).', 'সত্যতা যাচাই ঠিক আছে (ডেমো)।') : bi('Integrity check FAILED. Review required.', 'সত্যতা যাচাই ব্যর্থ। পর্যালোচনা দরকার।')}</p>
+            <ol className="timeline compact">{events?.map((event, index) => <li key={event._id ?? index}><strong><Term code={event.action} /></strong> <small><Term code={event.actorRole} /> · <time dateTime={event.createdAt}>{when(event.createdAt)}</time></small>{event.reason && <p>{tr(event.reason)}</p>}</li>)}</ol>
+          </Panel>
         </div>
-
-        {officer && <ReferralPanel applicationId={applicationId} officeCode={data.record.officeCode} accepted={data.record.status === 'ACCEPTED'} referrals={data.referrals} documents={data.documents} token={session.token} change={change} />}
-
-        {officer && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={data.record.assistance.caseType} documents={data.documents} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
-
-        {officer && data.record.channel === 'VOICE_SIM' && <CallRecording applicationId={applicationId} token={session.token} />}
-
-        {officer && data.transcript && <section className="card" aria-labelledby="transcript-title">
-          <h2 id="transcript-title">Voice transcript</h2>
-          <p className="muted">Kept with the call recording. Machine transcription by {data.transcript.transcribedBy}, not a verbatim legal record; confirmed facts are listed separately.</p>
-          <ol className="timeline">{data.transcript.turns.map((line, index) => <li key={index}><strong>{line.speaker === 'CALLER' ? 'Caller' : 'AI assistant'}</strong><p lang="bn">{line.text}</p></li>)}</ol>
-        </section>}
-
-        {officer && <div className="summary-grid">
-          <section className="card" aria-labelledby="facts-title"><h2 id="facts-title">Fact provenance</h2>{data.facts.length === 0 ? <p>No facts recorded.</p> : <ol className="timeline">{data.facts.map((fact) => <li key={fact._id}><strong>{fact.field}</strong><p>{fact.value}</p><small>{fact.sourceType.replaceAll('_', ' ')} · {fact.captureMethod} · Revision {fact.revision} · Caller confirmed: {fact.callerConfirmed ? 'yes' : 'no'} · Applicant confirmed: {fact.applicantConfirmed ? 'yes' : 'no'}{fact.aiInferred ? ' · AI-extracted from voice' : ''}</small></li>)}</ol>}</section>
-          <section className="card" aria-labelledby="timeline-title"><h2 id="timeline-title">Audit timeline</h2><p className="muted">Integrity check: {data.audit?.valid ? 'valid under demo assumptions' : 'FAILED — review required'}</p><ol className="timeline">{data.audit?.events.map((event) => <li key={event._id}><strong>{event.action.replaceAll('_', ' ')}</strong><p>{event.reason || 'No reason recorded for this event.'}</p><small>{event.actorRole.replaceAll('_', ' ')} · <time dateTime={event.createdAt}>{showDate(event.createdAt)}</time></small></li>)}</ol></section>
-        </div>}
       </>}
     </section>
   )

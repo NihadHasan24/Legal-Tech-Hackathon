@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../services/api.js'
+import { Bi, Term, tr } from '../components/Bi.jsx'
 import MediationPanel from './MediationPanel.jsx'
 
 export default function MediationPage({ session }) {
@@ -17,10 +18,10 @@ export default function MediationPage({ session }) {
   }, [applicationId, session.token])
 
   return <section aria-labelledby="mediation-page-title">
-    <Link to="/">← Workspace</Link>
-    <p className="eyebrow">Shared Application and Case · {role.replaceAll('_', ' ')}</p>
+    <Link to="/">← <Bi en="Workspace" bn="কর্মক্ষেত্র" /></Link>
+    <p className="eyebrow"><Bi en="Case" bn="মামলা" /> · <Term code={role} /></p>
     <h1 id="mediation-page-title">{record?.caseId || applicationId}</h1>
     {error && <p role="alert" className="error">{error}</p>}
-    {record && <><p>{record.applicantName} · Application {record.applicationId}</p><MediationPanel applicationId={applicationId} session={session} role={role} /></>}
+    {record && <><p className="record-sub">{tr(record.applicantName)} · <Bi en="Application" bn="আবেদন" /> {record.applicationId}</p><div className="card panels"><MediationPanel applicationId={applicationId} session={session} role={role} /></div></>}
   </section>
 }

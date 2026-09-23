@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../services/api.js'
-
-const showDate = (value) => value ? new Date(value).toLocaleString() : 'Not set'
+import { Badge, Bi, Term, bi, num, say, tr, when } from '../components/Bi.jsx'
 
 export default function ReferralPage({ session }) {
   const { referralId } = useParams()
@@ -39,60 +38,60 @@ export default function ReferralPage({ session }) {
 
   function submitResponse(event) {
     event.preventDefault()
-    respond({ action: decision, reason }, decision === 'ACCEPT' ? 'Referral accepted. The sending office can see this.' : 'Referral returned with your reason. The sending office can see this.')
+    respond({ action: decision, reason }, decision === 'ACCEPT' ? bi('Referral accepted. The sending office can see this.', 'রেফারেল গৃহীত। প্রেরক অফিস দেখতে পাবে।') : bi('Referral returned with your reason.', 'কারণসহ রেফারেল ফেরত পাঠানো হয়েছে।'))
   }
 
   const live = data && data.status !== 'RETURNED'
   return <section aria-labelledby="referral-title">
-    <Link to="/">← Workspace</Link>
-    <p className="eyebrow">Referral package{data ? ` · ${data.sendingOfficeCode} to ${data.receivingOfficeCode}` : ''}</p>
-    <h1 id="referral-title">{data?.caseId ?? 'Referral'}</h1>
+    <Link to="/">← <Bi en="Workspace" bn="কর্মক্ষেত্র" /></Link>
+    <div className="record-head">
+      <div><p className="eyebrow"><Bi en="Referral" bn="রেফারেল" />{data ? ` · ${data.sendingOfficeCode} → ${data.receivingOfficeCode}` : ''}</p><h1 id="referral-title">{data?.caseId ?? bi('Referral', 'রেফারেল')}</h1></div>
+      {data && <span><Badge code={data.status} />{data.overdue && <> <span className="badge warn-badge"><Bi en="Acknowledgement overdue" bn="প্রাপ্তি স্বীকার বাকি" /></span></>}</span>}
+    </div>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
-    {!error && !data && <p role="status">Loading referral…</p>}
+    {!error && !data && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
     {data && <>
       <div className="summary-grid">
-        <section className="card" aria-labelledby="package-title"><h2 id="package-title">Package</h2><dl className="details">
-          <div><dt>Status</dt><dd><span className="badge">{data.status}</span>{data.overdue && <> <span className="badge warn-badge">Acknowledgement overdue</span></>}</dd></div>
-          <div><dt>Applicant</dt><dd>{data.applicantName}</dd></div>
-          <div><dt>Application ID</dt><dd>{data.applicationId}</dd></div>
-          <div><dt>Responsible actor</dt><dd>{data.responsibleName}{data.responsible ? ' (you)' : ''}</dd></div>
-          <div><dt>Sent by</dt><dd>{data.sentByName} · {data.sendingOfficeCode} · {showDate(data.createdAt)}</dd></div>
-          <div><dt>Acknowledge by</dt><dd>{showDate(data.dueAt)}{data.acknowledgedAt ? ` · acknowledged ${showDate(data.acknowledgedAt)}` : ''}</dd></div>
-          <div><dt>Reason</dt><dd>{data.reason}</dd></div>
-          <div><dt>Relevant history</dt><dd>{data.history}</dd></div>
-          <div><dt>Expected action</dt><dd>{data.expectedAction}</dd></div>
-          {data.responseReason && <div><dt>Response reason</dt><dd>{data.responseReason}</dd></div>}
+        <section className="card" aria-labelledby="package-title"><h2 id="package-title"><Bi en="Package" bn="প্যাকেজ" /></h2><dl className="details compact">
+          <div><dt><Bi en="Applicant" bn="আবেদনকারী" /></dt><dd>{tr(data.applicantName)} · {data.applicationId}</dd></div>
+          <div><dt><Bi en="Responsible" bn="দায়িত্বে" /></dt><dd>{data.responsibleName}{data.responsible ? ` (${bi('you', 'আপনি')})` : ''}</dd></div>
+          <div><dt><Bi en="Sent by" bn="পাঠিয়েছেন" /></dt><dd>{data.sentByName} · {data.sendingOfficeCode} · {when(data.createdAt)}</dd></div>
+          <div><dt><Bi en="Acknowledge by" bn="প্রাপ্তি স্বীকারের শেষ সময়" /></dt><dd>{when(data.dueAt)}{data.acknowledgedAt ? ` · ${bi('acknowledged', 'স্বীকৃত')} ${when(data.acknowledgedAt)}` : ''}</dd></div>
+          <div><dt><Bi en="Reason" bn="কারণ" /></dt><dd>{data.reason}</dd></div>
+          <div><dt><Bi en="History" bn="ইতিহাস" /></dt><dd>{data.history}</dd></div>
+          <div><dt><Bi en="Expected action" bn="প্রত্যাশিত পদক্ষেপ" /></dt><dd>{data.expectedAction}</dd></div>
+          {data.responseReason && <div><dt><Bi en="Your reply" bn="আপনার উত্তর" /></dt><dd>{data.responseReason}</dd></div>}
         </dl></section>
-        <section className="card safety-card" aria-labelledby="referral-safe-title"><h2 id="referral-safe-title">Safe contact rules</h2>
-          {!data.safeContact ? <p>No safe-contact profile is recorded. Do not contact the applicant until the sending office confirms a safe route.</p> : <dl className="details">
-            <div><dt>Allowed</dt><dd>{data.safeContact.allowedChannels.join(', ') || 'None'}</dd></div>
-            <div><dt>Prohibited</dt><dd>{data.safeContact.prohibitedChannels.join(', ') || 'None'}</dd></div>
-            <div><dt>Safe time</dt><dd>{data.safeContact.safeTimeWindow || 'Not recorded'}</dd></div>
-            <div><dt>Neutral wording</dt><dd>{data.safeContact.neutralWordingRequired ? 'Required' : 'Not required'}</dd></div>
-            <div><dt>Unknown answer</dt><dd>{data.safeContact.unknownAnswerAction.replaceAll('_', ' ')}</dd></div>
+        <section className="card safety-card" aria-labelledby="referral-safe-title"><h2 id="referral-safe-title"><Bi en="Safe contact" bn="নিরাপদ যোগাযোগ" /></h2>
+          {!data.safeContact ? <p><Bi en="No safe route recorded. Do not contact until the sending office confirms one." bn="নিরাপদ পথ লেখা নেই। প্রেরক অফিস নিশ্চিত না করা পর্যন্ত যোগাযোগ করবেন না।" /></p> : <dl className="details compact">
+            <div><dt><Bi en="Use" bn="ব্যবহার করুন" /></dt><dd>{data.safeContact.allowedChannels.map(say).join(', ') || bi('None', 'নেই')}</dd></div>
+            <div><dt><Bi en="Never use" bn="কখনো নয়" /></dt><dd>{data.safeContact.prohibitedChannels.map(say).join(', ') || bi('None', 'নেই')}</dd></div>
+            <div><dt><Bi en="Safe time" bn="নিরাপদ সময়" /></dt><dd>{data.safeContact.safeTimeWindow || bi('Not recorded', 'লেখা নেই')}</dd></div>
+            <div><dt><Bi en="Neutral words" bn="নিরপেক্ষ কথা" /></dt><dd>{data.safeContact.neutralWordingRequired ? bi('Required', 'বাধ্যতামূলক') : bi('Not required', 'বাধ্যতামূলক নয়')}</dd></div>
+            <div><dt><Bi en="If someone else answers" bn="অন্য কেউ ধরলে" /></dt><dd><Term code={data.safeContact.unknownAnswerAction} /></dd></div>
           </dl>}
         </section>
       </div>
 
-      <section className="card" aria-labelledby="referral-docs-title"><h2 id="referral-docs-title">Documents and evidence</h2>
-        {data.documents.length === 0 ? <p>No documents are shared with you in this package.</p> : <ul className="plain-list">{data.documents.map((item) => <li key={item.id}><div><strong>{item.label}</strong><p>{item.sensitivity === 'RESTRICTED' ? 'Restricted evidence · opening is logged' : 'Standard document'} · version {item.currentVersion}</p></div>{data.responsible && live && <button type="button" className="secondary-button" onClick={() => open(item)} aria-label={`Open ${item.label}`}>Open</button>}</li>)}</ul>}
-        {data.restrictedEvidenceCount > 0 && !data.documents.some((item) => item.sensitivity === 'RESTRICTED') && <p className="muted">{data.restrictedEvidenceCount} restricted evidence item(s) are authorised for the named responsible actor only.</p>}
-        {opened && <div className="version-history" role="status"><h3>{opened.label}</h3><p>Version {opened.currentVersion} · {opened.version?.qualityState.replaceAll('_', ' ')}{opened.version?.note ? ` · ${opened.version.note}` : ''}</p></div>}
+      <section className="card" aria-labelledby="referral-docs-title"><h2 id="referral-docs-title"><Bi en="Documents and evidence" bn="নথি ও প্রমাণ" /></h2>
+        {data.documents.length === 0 ? <p><Bi en="No documents shared with you." bn="আপনার সাথে কোনো নথি ভাগ করা হয়নি।" /></p> : <ul className="plain-list">{data.documents.map((item) => <li key={item.id}><div><strong>{item.label}</strong> <Badge code={item.sensitivity} /><p className="muted"><Bi en="Version" bn="সংস্করণ" /> {num(item.currentVersion)}{item.sensitivity === 'RESTRICTED' ? ` · ${bi('opening is logged', 'খোলা লগ হয়')}` : ''}</p></div>{data.responsible && live && <button type="button" className="secondary-button" onClick={() => open(item)} aria-label={bi(`Open ${item.label}`, `${item.label} খুলুন`)}><Bi en="Open" bn="খুলুন" /></button>}</li>)}</ul>}
+        {data.restrictedEvidenceCount > 0 && !data.documents.some((item) => item.sensitivity === 'RESTRICTED') && <p className="muted"><Bi en={`${data.restrictedEvidenceCount} restricted item(s): named officer only.`} bn={`${num(data.restrictedEvidenceCount)}টি সীমিত প্রমাণ: শুধু নির্দিষ্ট কর্মকর্তার জন্য।`} /></p>}
+        {opened && <div className="version-history" role="status"><h3>{opened.label}</h3><p><Bi en="Version" bn="সংস্করণ" /> {num(opened.currentVersion)} · <Term code={opened.version?.qualityState} />{opened.version?.note ? ` · ${opened.version.note}` : ''}</p></div>}
       </section>
 
-      {data.previousReturns.length > 0 && <section className="card" aria-labelledby="returns-title"><h2 id="returns-title">Earlier returns of this case</h2><ol className="timeline">{data.previousReturns.map((item, index) => <li key={index}><strong>{item.receivingOfficeCode}</strong><p>{item.reason}</p><small>{showDate(item.respondedAt)}</small></li>)}</ol></section>}
+      {data.previousReturns.length > 0 && <section className="card" aria-labelledby="returns-title"><h2 id="returns-title"><Bi en="Earlier returns of this case" bn="আগে যতবার ফেরত এসেছে" /></h2><ol className="timeline compact">{data.previousReturns.map((item, index) => <li key={index}><strong>{item.receivingOfficeCode}</strong> <small>{when(item.respondedAt)}</small><p>{item.reason}</p></li>)}</ol></section>}
 
-      <section className="card" aria-labelledby="respond-title"><h2 id="respond-title">Your office’s response</h2>
-        <p className="muted">Acknowledging confirms receipt. Accepting means your office takes the expected action. Final legal jurisdiction stays a human decision; repeated returns go to an authorised routing decision.</p>
-        {data.status === 'SENT' && <button type="button" onClick={() => respond({ action: 'ACKNOWLEDGE' }, 'Receipt acknowledged. The sending office can see this.')}>Acknowledge receipt</button>}
+      <section className="card" aria-labelledby="respond-title"><h2 id="respond-title"><Bi en="Your office's response" bn="আপনার অফিসের উত্তর" /></h2>
+        <p className="muted"><Bi en="Acknowledge = received. Accept = your office will act. Repeated returns go to an officer who decides the route." bn="স্বীকার = পেয়েছেন। গ্রহণ = আপনার অফিস কাজ করবে। বারবার ফেরত গেলে একজন কর্মকর্তা পথ ঠিক করেন।" /></p>
+        {data.status === 'SENT' && <button type="button" onClick={() => respond({ action: 'ACKNOWLEDGE' }, bi('Receipt acknowledged. The sending office can see this.', 'প্রাপ্তি স্বীকার করা হয়েছে। প্রেরক অফিস দেখতে পাবে।'))}><Bi en="Acknowledge receipt" bn="প্রাপ্তি স্বীকার" /></button>}
         {(data.status === 'SENT' || data.status === 'ACKNOWLEDGED') ? <form onSubmit={submitResponse} className="form-stack inline-form">
-          <label htmlFor="referral-decision">Decision</label>
-          <select id="referral-decision" value={decision} onChange={(event) => setDecision(event.target.value)}><option value="ACCEPT">Accept the referral</option><option value="RETURN">Return to the sending office</option></select>
-          <label htmlFor="referral-response-reason">Response reason</label>
+          <label htmlFor="referral-decision"><Bi en="Decision" bn="সিদ্ধান্ত" /></label>
+          <select id="referral-decision" value={decision} onChange={(event) => setDecision(event.target.value)}><option value="ACCEPT">{bi('Accept the referral', 'রেফারেল গ্রহণ')}</option><option value="RETURN">{bi('Return to the sending office', 'প্রেরক অফিসে ফেরত')}</option></select>
+          <label htmlFor="referral-response-reason"><Bi en="Response reason" bn="উত্তরের কারণ" /></label>
           <textarea id="referral-response-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="10" maxLength="1000" required />
-          <button type="submit">Record response</button>
-        </form> : <p>Response recorded: {data.status.toLowerCase()} on {showDate(data.respondedAt)}.</p>}
+          <button type="submit"><Bi en="Record response" bn="উত্তর সংরক্ষণ" /></button>
+        </form> : <p><Bi en="Response recorded:" bn="উত্তর লেখা হয়েছে:" /> <Term code={data.status} /> · {when(data.respondedAt)}</p>}
       </section>
     </>}
   </section>

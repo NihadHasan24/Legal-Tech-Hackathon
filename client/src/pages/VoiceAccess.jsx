@@ -1,12 +1,14 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { api } from '../services/api.js'
 import { appendTranscript, applyExtraction, closeMicrophone, openMicrophone, startRecording } from '../utils/voiceAgent.js'
-import { activeFields, answer, correct, displayValue, nextField, payload, startCall, steps } from '../utils/voiceScript.js'
+import { activeFields, answer, correct, nextField, payload, startCall, steps } from '../utils/voiceScript.js'
+import { getLang, useLang } from '../components/Bi.jsx'
 
 // A phone-call screen for the 16699 simulation, run like an IVR line: a recorded Bangla clip asks each question,
 // the caller answers choices and numbers on the keypad, speaks other answers after the beep and presses # when done.
-// The whole call is recorded under the greeting's notice.
-const copy = {
+// The whole call is recorded under the greeting's notice. The clips are recorded in Bangla only, so English mode shows
+// the questions as text and skips the clips (like light mode) until English recordings exist.
+const copies = { bn: {
   simulation: 'ওয়েব সিমুলেশন · আসল ফোন কল নয়',
   call: 'কল করুন',
   hangUp: 'কল শেষ করুন',
@@ -35,14 +37,63 @@ const copy = {
   code: 'স্ট্যাটাস জানার গোপন কোড',
   codeNote: 'কোডটি একবারই দেখানো হচ্ছে। লিখে রাখুন, কাউকে দেবেন না।',
   newCall: 'নতুন কল',
-}
+  title: 'লিগ্যাল এইড হেল্পলাইন',
+  keypad: 'কিপ্যাড',
+  answer: 'উত্তর দিন',
+  yourVoice: 'আপনার কণ্ঠ',
+  fix: 'সংশোধন করুন',
+  submitted: 'আবেদন জমা হয়েছে',
+  erase: 'মুছুন',
+}, en: {
+  simulation: 'Web simulation · not a real phone call',
+  call: 'Call',
+  hangUp: 'End call',
+  hangUpConfirm: 'End the call? Your answers will not be submitted.',
+  recording: 'This call is being recorded',
+  repeatKey: 'Repeat',
+  finishKey: 'Done',
+  submitKey: 'Submit',
+  typeInstead: 'Type your answer',
+  readback: 'Check what you said',
+  listening: 'Listening… press # when you finish.',
+  transcribing: 'Understanding your answer…',
+  submitting: 'Submitting the application…',
+  micDenied: 'The microphone could not start. Allow microphone access to begin this call.',
+  voiceOff: 'Voice understanding is not available right now. Type your answer; your answers are kept.',
+  urgent: 'Your safety comes first. We will take only contact details and a staff member will call you. In immediate danger, call 999.',
+  representative: 'This information comes from a representative; it stays that way until the applicant confirms it.',
+  failed: 'Could not submit; your answers are kept. Press 1 again.',
+  uploading: 'Application submitted. Saving the call recording; keep this page open.',
+  recordingFailed: 'Application submitted, but the call recording was not saved. Keep this page open and try again.',
+  recordingMissing: 'Application submitted, but no call recording was found. Note the application number and ask staff for help.',
+  recordingUnavailable: 'Application submitted, but the call recording could not be saved. Note the application number and ask staff for help.',
+  retryRecording: 'Send the recording again',
+  review: 'A legal aid officer will review the application and contact you.',
+  callback: 'A staff member will call the safe number you gave, at the safe time.',
+  code: 'Secret code for checking status',
+  codeNote: 'This code is shown only once. Write it down and do not share it.',
+  newCall: 'New call',
+  title: 'Legal Aid Helpline',
+  keypad: 'Keypad',
+  answer: 'Answer',
+  yourVoice: 'Your voice',
+  fix: 'Correct',
+  submitted: 'Application submitted',
+  erase: 'Erase',
+} }
+const bn = () => getLang() === 'bn'
+const text = () => copies[getLang()]
+const labelOf = (field) => (bn() ? steps[field].label : steps[field].labelEn)
+const promptOf = (field) => (bn() ? steps[field].prompt : steps[field].en)
+const choiceText = (choice) => (bn() ? choice[1] : choice[2])
+const shownValue = (call, field) => { const choice = steps[field].choices?.find(([value]) => value === call.answers[field]); return choice ? choiceText(choice) : call.answers[field] }
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
 const DTMF = { 1: [697, 1209], 2: [697, 1336], 3: [697, 1477], 4: [770, 1209], 5: [770, 1336], 6: [770, 1477], 7: [852, 1209], 8: [852, 1336], 9: [852, 1477], '*': [941, 1209], 0: [941, 1336], '#': [941, 1477] }
 const NO_INPUT_MS = 12000 // a choice or number question waits this long before the "no answer" clip
 const MIN_SPOKEN_MS = 700 // a # sooner than this after the beep counts as no answer
 const MAX_MISSES = 2 // after this many "no answer" clips in a row, wait quietly for a key
-const bnDigits = (text) => text.replace(/[0-9]/g, (digit) => '০১২৩৪৫৬৭৮৯'[digit])
+const bnDigits = (value) => (bn() ? value.replace(/[0-9]/g, (digit) => '০১২৩৪৫৬৭৮৯'[digit]) : value)
 const kindOf = (field) => (!field ? 'READBACK' : steps[field].choices ? 'CHOICE' : steps[field].tel ? 'DIGITS' : 'SPOKEN')
 const lightMode = () => { try { return localStorage.getItem('dlas-light-mode') === '1' } catch { return false } }
 
@@ -83,7 +134,6 @@ function createClipPlayer() {
   }
 }
 
-const twoDigits = new Intl.NumberFormat('bn-BD', { minimumIntegerDigits: 2 })
 
 // Kept in its own component so the ticking clock re-renders only itself.
 function CallTimer() {
@@ -92,12 +142,13 @@ function CallTimer() {
     const id = setInterval(() => setSeconds((value) => value + 1), 1000)
     return () => clearInterval(id)
   }, [])
+  const twoDigits = new Intl.NumberFormat(bn() ? 'bn-BD' : 'en-BD', { minimumIntegerDigits: 2 })
   return <span className="call-timer" role="timer">{twoDigits.format(Math.floor(seconds / 60))}:{twoDigits.format(seconds % 60)}</span>
 }
 
 function Keypad({ hints, onPress }) {
   return (
-    <div className="keypad" role="group" aria-label="কিপ্যাড">
+    <div className="keypad" role="group" aria-label={text().keypad}>
       {KEYS.map((key) => (
         <button key={key} type="button" className="keypad-key" onClick={() => onPress(key)}>
           <span className="keypad-digit">{bnDigits(key)}</span>{hints[key] && <>{' '}<span className="keypad-hint">{hints[key]}</span></>}
@@ -115,22 +166,23 @@ function TypedAnswer({ field, initial, onAnswer }) {
     <form className="call-typed" onSubmit={(event) => { event.preventDefault(); onAnswer(draft.trim()) }}>
       <Field id="voice-answer" name={field} aria-labelledby="voice-prompt" value={draft} onChange={(event) => setDraft(event.target.value)}
         required minLength={step.min ?? 2} maxLength={step.max ?? 20} autoComplete="off" autoFocus />
-      <button type="submit" className="secondary-button">উত্তর দিন</button>
+      <button type="submit" className="secondary-button">{text().answer}</button>
     </form>
   )
 }
 
 function Readback({ call, recordings, onCorrect }) {
+  const copy = copies[useLang()]
   return (
     <>
       {call.mode === 'INTAKE' && call.answers.callerRole === 'REPRESENTATIVE' && <p className="call-note">{copy.representative}</p>}
       <dl className="details readback">
         {activeFields(call).map((field) => <div key={field}>
-          <dt>{steps[field].label}</dt>
+          <dt>{labelOf(field)}</dt>
           <dd>
-            {displayValue(call, field)}
-            {recordings[field] && <audio controls preload="none" src={recordings[field]} aria-label={`আপনার কণ্ঠ: ${steps[field].label}`} />}
-            <button type="button" className="text-button" onClick={() => onCorrect(field)}>সংশোধন করুন <span className="visually-hidden">{steps[field].label}</span></button>
+            {shownValue(call, field)}
+            {recordings[field] && <audio controls preload="none" src={recordings[field]} aria-label={`${copy.yourVoice}: ${labelOf(field)}`} />}
+            <button type="button" className="text-button" onClick={() => onCorrect(field)}>{copy.fix} <span className="visually-hidden">{labelOf(field)}</span></button>
           </dd>
         </div>)}
       </dl>
@@ -139,6 +191,7 @@ function Readback({ call, recordings, onCorrect }) {
 }
 
 export default function VoiceAccess() {
+  const copy = copies[useLang()]
   const [call, setCall] = useState(null)
   const [modeState, setModeState] = useState({ turn: 'IDLE', mode: 'PROMPT' })
   const [attempt, setAttempt] = useState(0)
@@ -188,7 +241,7 @@ export default function VoiceAccess() {
     intros.forEach((clip) => introsRef.current.add(clip))
     const clips = [...leadRef.current, ...intros, ...(done ? submission.status === 'DONE' ? ['submitted'] : [] : [field ?? 'readback'])]
     leadRef.current = []
-    const finished = lightMode() || await playerRef.current.play(clips)
+    const finished = lightMode() || !bn() || await playerRef.current.play(clips)
     if (finished && run === runRef.current && !done) listen()
   })
   useEffect(() => { askTurn() }, [turn])
@@ -260,6 +313,7 @@ export default function VoiceAccess() {
 
   function choose(value) {
     cancelAnswer()
+    setRecordings((existing) => ({ ...existing, [field]: undefined })) // a keyed or typed answer has no voice clip
     setCall(answer(call, field, value))
   }
 
@@ -299,7 +353,7 @@ export default function VoiceAccess() {
     if (!heard) return repeat('noInput')
     setMode('PROCESSING')
     try {
-      const result = await api(`/api/voice/answers?fields=${activeFields(call).join(',')}`, { method: 'POST', audio: clip })
+      const result = await api(`/api/voice/answers?fields=${field}`, { method: 'POST', audio: clip })
       if (run !== runRef.current) return
       if (result.text) transcriptRef.current = appendTranscript(transcriptRef.current, 'CALLER', result.text)
       const { call: next, accepted } = applyExtraction(call, result.values)
@@ -409,13 +463,13 @@ export default function VoiceAccess() {
   }
 
   const hints = { '*': copy.repeatKey }
-  if (kind === 'CHOICE') steps[field].choices.forEach(([, label], index) => { hints[index + 1] = label })
+  if (kind === 'CHOICE') steps[field].choices.forEach((choice, index) => { hints[index + 1] = choiceText(choice) })
   if (kind === 'DIGITS' || mode === 'RECORDING') hints['#'] = copy.finishKey
   if (kind === 'READBACK') hints[1] = copy.submitKey
   return (
-    <section className="call-page" aria-labelledby="voice-title" lang="bn">
+    <section className="call-page" aria-labelledby="voice-title" lang={getLang()}>
       <header className="call-head">
-        <h1 id="voice-title">লিগ্যাল এইড হেল্পলাইন <span translate="no">১৬৬৯৯</span></h1>
+        <h1 id="voice-title">{copy.title} <span translate="no">{bnDigits('16699')}</span></h1>
         <p className="sim-badge">{copy.simulation}</p>
       </header>
 
@@ -436,7 +490,7 @@ export default function VoiceAccess() {
 
           {done
             ? <div className="call-turn">
-              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>আবেদন জমা হয়েছে: <span lang="en" translate="no">{submission.applicationId}</span></h2>
+              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{copy.submitted}: <span lang="en" translate="no">{submission.applicationId}</span></h2>
               <p>{call.mode === 'CALLBACK' ? copy.callback : copy.review}</p>
               <p className="call-code">{copy.code}: <strong lang="en" translate="no">{submission.lookupCode}</strong></p>
               <p className="muted">{copy.codeNote}</p>
@@ -446,10 +500,10 @@ export default function VoiceAccess() {
               {submission.status === 'DONE' && <button type="button" className="secondary-button" onClick={() => setCall(null)}>{copy.newCall}</button>}
             </div>
             : <div className="call-turn">
-              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{field ? steps[field].prompt : copy.readback}</h2>
+              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{field ? promptOf(field) : copy.readback}</h2>
               {kind === 'DIGITS' && <div className="call-digits">
-                <output aria-label={steps[field].label}>{bnDigits(digits)}</output>
-                {digits && <button type="button" className="text-button" onClick={() => editDigits((value) => value.slice(0, -1))}>মুছুন</button>}
+                <output aria-label={labelOf(field)}>{bnDigits(digits)}</output>
+                {digits && <button type="button" className="text-button" onClick={() => editDigits((value) => value.slice(0, -1))}>{copy.erase}</button>}
               </div>}
               {kind === 'READBACK' && <Readback call={call} recordings={recordings}
                 onCorrect={(item) => { setSubmission({ status: 'IDLE' }); setCall(correct(call, item)) }} />}

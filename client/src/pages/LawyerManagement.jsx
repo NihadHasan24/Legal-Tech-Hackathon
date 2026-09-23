@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api.js'
+import { AddForm, Badge, Bi, Panel, Term, bi, num, say, when } from '../components/Bi.jsx'
 
-const dateText = (value) => value ? new Intl.DateTimeFormat('en-BD', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not set'
 const localDate = (value) => {
   if (!value) return ''
   const date = new Date(value)
@@ -51,14 +51,14 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
     const hearingAt = form.get('nextHearingAt')
     if (await mutate(`/api/lawyers/applications/${applicationId}/case-plan`, {
       nextHearingAt: hearingAt ? new Date(hearingAt).toISOString() : null, nextAction: form.get('nextAction'), reason: form.get('reason'),
-    }, 'Case hearing and next step recorded on the shared Case.')) setPlanReason('')
+    }, bi('Hearing and next step saved.', 'শুনানি ও পরবর্তী ধাপ সংরক্ষিত।'))) setPlanReason('')
   }
 
   async function offerAssignment(event) {
     event.preventDefault()
     if (await mutate(`/api/lawyers/applications/${applicationId}/assignments`, {
       lawyerUserId, reason: assignmentReason, ...(changeRequestId ? { changeRequestId } : {}),
-    }, 'A human-reviewed assignment offer was sent. The Case remains active until the lawyer accepts.')) setAssignmentReason('')
+    }, bi('Offer sent. It starts when the lawyer accepts.', 'প্রস্তাব পাঠানো হয়েছে। আইনজীবী গ্রহণ করলে শুরু হবে।'))) setAssignmentReason('')
   }
 
   async function schedule(event) {
@@ -67,20 +67,20 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
     const form = new FormData(event.currentTarget)
     if (await mutate(`/api/lawyers/applications/${applicationId}/update-schedules`, {
       assignmentId: form.get('assignmentId'), dueAt: new Date(form.get('dueAt')).toISOString(), instruction: form.get('instruction'),
-    }, 'Mandatory lawyer update scheduled.')) target.reset()
+    }, bi('Update scheduled.', 'আপডেট নির্ধারিত।'))) target.reset()
   }
 
   function reviewRequest(requestId, decision) {
     mutate(`/api/lawyers/applications/${applicationId}/change-requests/${requestId}/review`, {
       decision, reason: reviewReasons[requestId] || '',
     }, decision === 'APPROVE'
-      ? 'Request approved by a human. Reassignment is a separate DLAO action.'
-      : 'Request declined by a human with a recorded reason.')
+      ? bi('Request approved. Offer a new lawyer separately.', 'অনুরোধ অনুমোদিত। নতুন আইনজীবী আলাদাভাবে প্রস্তাব করুন।')
+      : bi('Request declined with reason.', 'কারণসহ অনুরোধ প্রত্যাখ্যাত।'))
   }
 
   function reviewHold(lawyerId, decision) {
     mutate(`/api/lawyers/holds/${lawyerId}/review`, { decision, reason: holdReasons[lawyerId] || '' },
-      decision === 'LIFT' ? 'Human reviewer lifted the temporary hold. Existing case assignments were not changed.' : 'Human reviewer continued the temporary hold. Existing case assignments were not changed.')
+      decision === 'LIFT' ? bi('Hold lifted. Current cases unchanged.', 'স্থগিতাদেশ তোলা হয়েছে। চলমান মামলা অপরিবর্তিত।') : bi('Hold continued. Current cases unchanged.', 'স্থগিতাদেশ বহাল। চলমান মামলা অপরিবর্তিত।'))
   }
 
   async function recordPayment(event) {
@@ -88,85 +88,92 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
     const assignment = data.assignments.find(({ id }) => id === (paymentAssignmentId || paymentAssignments[0]?.id))
     if (!assignment) return
     if (await mutate(`/api/lawyers/assignments/${assignment.id}/payment-status`, { stage: paymentStage, status: paymentStatus, reason: paymentReason },
-      'Payment status recorded for reconciliation only. No money moved.')) setPaymentReason('')
+      bi('Payment status saved. No money moved.', 'পেমেন্টের অবস্থা সংরক্ষিত। কোনো টাকা লেনদেন হয়নি।'))) setPaymentReason('')
   }
 
-  if (!data) return <section className="card" aria-labelledby="lawyer-title"><h2 id="lawyer-title">Panel lawyer workflow</h2>{error ? <p role="alert" className="error">{error}</p> : <p role="status">Loading lawyer workflow…</p>}</section>
+  const activeAssignments = data?.assignments.filter(({ active, status }) => active && status === 'ACCEPTED') ?? []
+  const paymentAssignments = data?.assignments.filter(({ status }) => status === 'ACCEPTED' || status === 'REASSIGNED') ?? []
+  const pendingAssignments = data?.assignments.filter(({ active, status }) => active && status === 'PENDING') ?? []
+  const approvedRequests = data?.changeRequests.filter(({ status }) => status === 'APPROVED') ?? []
+  const openRequests = data?.changeRequests.filter(({ status }) => status === 'OPEN') ?? []
+  const holds = data?.panelLawyers.filter(({ hold }) => hold?.newAssignmentHold) ?? []
+  const hint = activeAssignments[0]?.lawyerName ?? (pendingAssignments.length ? bi('Offer pending', 'প্রস্তাব অপেক্ষমাণ') : data && bi('No lawyer yet', 'এখনো আইনজীবী নেই'))
 
-  const activeAssignments = data.assignments.filter(({ active, status }) => active && status === 'ACCEPTED')
-  const paymentAssignments = data.assignments.filter(({ status }) => status === 'ACCEPTED' || status === 'REASSIGNED')
-  const pendingAssignments = data.assignments.filter(({ active, status }) => active && status === 'PENDING')
-  const approvedRequests = data.changeRequests.filter(({ status }) => status === 'APPROVED')
-  const holds = data.panelLawyers.filter(({ hold }) => hold?.newAssignmentHold)
-
-  return <section className="card" aria-labelledby="lawyer-title">
-    <h2 id="lawyer-title">Panel lawyer work and accountability</h2>
-    <p className="muted">All actions use this accepted Case. Payment entries are status records only; the prototype does not move money. Hold-review authority is a demo route pending legal/administrative policy verification.</p>
+  return <Panel id="lawyer-title" en="Lawyer" bn="আইনজীবী" hint={hint} open={holds.length > 0 || openRequests.length > 0}>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
+    {!data && !error && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
+    {data && <>
+      {holds.map(({ id, displayName, hold }) => <section className="escalation-box" key={id} aria-label={bi('Lawyer assignment hold', 'আইনজীবী নিয়োগ স্থগিত')}>
+        <h3><Bi en="New assignments on hold: review needed" bn="নতুন নিয়োগ স্থগিত: পর্যালোচনা দরকার" /></h3>
+        <p>{displayName}: <Bi en="missed 2 updates in a row. Current cases continue. No misconduct finding." bn="পরপর ২টি আপডেট দেননি। চলমান মামলা চলবে। এটি অসদাচরণের সিদ্ধান্ত নয়।" /></p>
+        <p className="muted"><Term code={hold.reviewerRole} /> · <Term code={hold.reviewState} /> · <Bi en="Demo reviewer; legal authority not yet confirmed." bn="ডেমো পর্যালোচক; আইনি কর্তৃপক্ষ এখনো নিশ্চিত নয়।" /></p>
+        {hold.reviewReason && <p><Bi en="Last reason:" bn="শেষ কারণ:" /> {hold.reviewReason}</p>}
+        <label htmlFor={`hold-reason-${id}`}><Bi en="Hold review reason" bn="পর্যালোচনার কারণ" /></label>
+        <textarea id={`hold-reason-${id}`} value={holdReasons[id] || ''} onChange={(event) => setHoldReasons((current) => ({ ...current, [id]: event.target.value }))} minLength="10" maxLength="500" />
+        <div className="choice-row"><button type="button" disabled={busy || (holdReasons[id] || '').trim().length < 10} onClick={() => reviewHold(id, 'LIFT')}><Bi en="Lift hold" bn="স্থগিতাদেশ তুলুন" /></button><button type="button" className="secondary-button" disabled={busy || (holdReasons[id] || '').trim().length < 10} onClick={() => reviewHold(id, 'CONTINUE')}><Bi en="Continue hold" bn="বহাল রাখুন" /></button></div>
+      </section>)}
 
-    {holds.map(({ id, displayName, hold }) => <section className="escalation-box" key={id} aria-label="Temporary lawyer assignment hold">
-      <h3>Temporary new-assignment hold · human review required</h3>
-      <p>{displayName}: two consecutive mandatory updates were missed. Existing cases remain active. No misconduct finding or payment recovery has been made.</p>
-      <p className="muted">{data.authorityNotice} Reviewer route: {hold.reviewerRole.replaceAll('_', ' ')} · state {hold.reviewState.replaceAll('_', ' ')}.</p>
-      {hold.reviewReason && <p>Last review reason: {hold.reviewReason}</p>}
-      <label htmlFor={`hold-reason-${id}`}>Human hold-review reason</label>
-      <textarea id={`hold-reason-${id}`} value={holdReasons[id] || ''} onChange={(event) => setHoldReasons((current) => ({ ...current, [id]: event.target.value }))} minLength="10" maxLength="500" />
-      <div className="choice-row"><button type="button" disabled={busy || (holdReasons[id] || '').trim().length < 10} onClick={() => reviewHold(id, 'LIFT')}>Lift hold</button><button type="button" className="secondary-button" disabled={busy || (holdReasons[id] || '').trim().length < 10} onClick={() => reviewHold(id, 'CONTINUE')}>Continue hold</button></div>
-    </section>)}
+      <div className="block"><h3 id="assignment-title"><Bi en="Assigned lawyer" bn="নিযুক্ত আইনজীবী" /></h3>
+        {data.assignments.length === 0 ? <p className="muted"><Bi en="No lawyer yet." bn="এখনো আইনজীবী নেই।" /></p> : <ul className="plain-list">{data.assignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong> <Badge code={item.status} />{!item.active && <small className="muted"> · <Bi en="past" bn="আগের" /></small>}{item.hold && <p><small><Bi en="Hold" bn="স্থগিত" />: <Term code={item.hold.reviewState} /></small></p>}</div></li>)}</ul>}
+        {pendingAssignments.length > 0 && <p role="status"><Bi en="Waiting for the lawyer to accept or decline." bn="আইনজীবীর উত্তরের অপেক্ষা।" /></p>}
+        <AddForm en="Offer to a lawyer" bn="আইনজীবীকে প্রস্তাব দিন">
+          <form onSubmit={offerAssignment} className="form-stack inline-form">
+            <label htmlFor="panel-lawyer"><Bi en="Panel lawyer" bn="প্যানেল আইনজীবী" /></label><select id="panel-lawyer" value={lawyerUserId} onChange={(event) => setLawyerUserId(event.target.value)} required><option value="">{bi('Choose', 'বাছাই করুন')}</option>{data.panelLawyers.map((person) => <option key={person.id} value={person.id} disabled={person.hold?.newAssignmentHold}>{person.displayName}{person.hold?.newAssignmentHold ? ` · ${bi('on hold', 'স্থগিত')}` : ''}</option>)}</select>
+            <label htmlFor="assignment-change-request"><Bi en="Linked change request" bn="সংশ্লিষ্ট বদলের অনুরোধ" /></label><select id="assignment-change-request" value={changeRequestId} onChange={(event) => setChangeRequestId(event.target.value)}><option value="">{bi('None: officer decision', 'নেই: কর্মকর্তার সিদ্ধান্ত')}</option>{approvedRequests.map((item) => <option key={item.id} value={item.id}>{bi('Approved request', 'অনুমোদিত অনুরোধ')} · {when(item.createdAt)}</option>)}</select>
+            <label htmlFor="assignment-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="assignment-reason" value={assignmentReason} onChange={(event) => setAssignmentReason(event.target.value)} minLength="10" maxLength="500" required />
+            <button type="submit" disabled={busy || !lawyerUserId || pendingAssignments.length > 0}><Bi en="Send offer" bn="প্রস্তাব পাঠান" /></button>
+          </form>
+        </AddForm>
+      </div>
 
-    <div className="summary-grid">
-      <section aria-labelledby="plan-title"><h3 id="plan-title">Hearing and next step</h3>
-        <form onSubmit={savePlan} className="form-stack">
-          <label htmlFor="lawyer-hearing">Next hearing date and time</label><input id="lawyer-hearing" name="nextHearingAt" type="datetime-local" defaultValue={localDate(data.casePlan.nextHearingAt)} />
-          <label htmlFor="lawyer-next-action">Applicant-safe next step</label><textarea id="lawyer-next-action" name="nextAction" defaultValue={data.casePlan.nextAction} minLength="5" maxLength="300" required /><small>Helpline staff may read this aloud. Do not include confidential facts or unsafe contact details.</small>
-          <label htmlFor="plan-reason">Reason for this case-plan update</label><textarea id="plan-reason" name="reason" value={planReason} onChange={(event) => setPlanReason(event.target.value)} minLength="10" maxLength="500" required />
-          <button type="submit" disabled={busy}>Save case plan</button>
-        </form>
-      </section>
+      <div className="block"><h3 id="plan-title"><Bi en="Hearing and next step" bn="শুনানি ও পরবর্তী ধাপ" /></h3>
+        <dl className="details compact">
+          <div><dt><Bi en="Next hearing" bn="পরবর্তী শুনানি" /></dt><dd>{when(data.casePlan.nextHearingAt)}</dd></div>
+          <div><dt><Bi en="Next step" bn="পরবর্তী ধাপ" /></dt><dd>{data.casePlan.nextAction || bi('Not set', 'নির্ধারিত নয়')}</dd></div>
+        </dl>
+        <AddForm en="Update hearing or next step" bn="শুনানি বা ধাপ হালনাগাদ">
+          <form onSubmit={savePlan} className="form-stack inline-form">
+            <label htmlFor="lawyer-hearing"><Bi en="Next hearing" bn="পরবর্তী শুনানি" /></label><input id="lawyer-hearing" name="nextHearingAt" type="datetime-local" defaultValue={localDate(data.casePlan.nextHearingAt)} />
+            <label htmlFor="lawyer-next-action"><Bi en="Next step for the applicant" bn="আবেদনকারীর পরবর্তী ধাপ" /></label><textarea id="lawyer-next-action" name="nextAction" defaultValue={data.casePlan.nextAction} minLength="5" maxLength="300" required /><small><Bi en="May be read aloud. No private facts or contact details." bn="পড়ে শোনানো হতে পারে। গোপন তথ্য বা নম্বর লিখবেন না।" /></small>
+            <label htmlFor="plan-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="plan-reason" name="reason" value={planReason} onChange={(event) => setPlanReason(event.target.value)} minLength="10" maxLength="500" required />
+            <button type="submit" disabled={busy}><Bi en="Save" bn="সংরক্ষণ" /></button>
+          </form>
+        </AddForm>
+      </div>
 
-      <section aria-labelledby="assignment-title"><h3 id="assignment-title">Offer a panel-lawyer assignment</h3>
-        {pendingAssignments.length > 0 && <p role="status">An offer is awaiting the lawyer’s accept/decline response.</p>}
-        <form onSubmit={offerAssignment} className="form-stack">
-          <label htmlFor="panel-lawyer">Active panel lawyer in this office</label><select id="panel-lawyer" value={lawyerUserId} onChange={(event) => setLawyerUserId(event.target.value)} required><option value="">Choose a lawyer</option>{data.panelLawyers.map((person) => <option key={person.id} value={person.id} disabled={person.hold?.newAssignmentHold}>{person.displayName}{person.hold?.newAssignmentHold ? ' · temporary hold' : ''}</option>)}</select>
-          <label htmlFor="assignment-change-request">Approved applicant request (if applicable)</label><select id="assignment-change-request" value={changeRequestId} onChange={(event) => setChangeRequestId(event.target.value)}><option value="">Separate human case-protection action</option>{approvedRequests.map((item) => <option key={item.id} value={item.id}>Approved request · {dateText(item.createdAt)}</option>)}</select>
-          <label htmlFor="assignment-reason">Human assignment reason</label><textarea id="assignment-reason" value={assignmentReason} onChange={(event) => setAssignmentReason(event.target.value)} minLength="10" maxLength="500" required />
-          <button type="submit" disabled={busy || !lawyerUserId || pendingAssignments.length > 0}>Send assignment offer</button>
-        </form>
-        {activeAssignments.length === 0 && <p>No accepted panel-lawyer assignment is active.</p>}
-        <ul className="plain-list">{data.assignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong><p>Assignment {item.status.toLowerCase()} · {item.active ? 'active' : 'historical'}</p>{item.hold && <small>Temporary new-assignment hold: {item.hold.reviewState.replaceAll('_', ' ')}</small>}</div></li>)}</ul>
-      </section>
-    </div>
+      {activeAssignments.length > 0 && <div className="block"><h3 id="schedule-title"><Bi en="Progress updates" bn="অগ্রগতির আপডেট" /></h3>
+        {data.updates.length === 0 ? <p className="muted"><Bi en="None scheduled." bn="কোনো আপডেট নির্ধারিত নেই।" /></p> : <ol className="timeline compact">{data.updates.map((item) => <li key={item.id}><strong><Bi en="Update" bn="আপডেট" /> {num(item.sequence)}</strong> <Badge code={item.status} /><p>{item.instruction}</p><small><Bi en="Due" bn="শেষ সময়" /> {when(item.dueAt)}{item.missedAt ? ` · ${bi('missed', 'বাদ')} ${when(item.missedAt)}` : ''}{item.nextAction ? ` · ${bi('next', 'পরবর্তী')}: ${item.nextAction}` : ''}</small>{item.report && <p><Bi en="Report:" bn="প্রতিবেদন:" /> {item.report}</p>}</li>)}</ol>}
+        <AddForm en="Schedule an update" bn="আপডেট নির্ধারণ">
+          <form onSubmit={schedule} className="form-stack inline-form">
+            <label htmlFor="update-assignment"><Bi en="Lawyer" bn="আইনজীবী" /></label><select id="update-assignment" name="assignmentId" defaultValue={activeAssignments[0]?.id}>{activeAssignments.map((item) => <option key={item.id} value={item.id}>{item.lawyerName}</option>)}</select>
+            <label htmlFor="update-deadline"><Bi en="Deadline" bn="শেষ সময়" /></label><input id="update-deadline" name="dueAt" type="datetime-local" required />
+            <label htmlFor="update-instruction"><Bi en="What to report" bn="কী জানাতে হবে" /></label><textarea id="update-instruction" name="instruction" minLength="5" maxLength="300" required />
+            <button type="submit" disabled={busy}><Bi en="Schedule" bn="নির্ধারণ করুন" /></button>
+          </form>
+        </AddForm>
+      </div>}
 
-    {activeAssignments.length > 0 && <div className="summary-grid">
-      <section aria-labelledby="schedule-title"><h3 id="schedule-title">Required progress updates</h3>
-        <form onSubmit={schedule} className="form-stack">
-          <label htmlFor="update-assignment">Accepted assignment</label><select id="update-assignment" name="assignmentId" defaultValue={activeAssignments[0]?.id}>{activeAssignments.map((item) => <option key={item.id} value={item.id}>{item.lawyerName} · {item.id}</option>)}</select>
-          <label htmlFor="update-deadline">Update deadline</label><input id="update-deadline" name="dueAt" type="datetime-local" required />
-          <label htmlFor="update-instruction">Required update / next action</label><textarea id="update-instruction" name="instruction" minLength="5" maxLength="300" required />
-          <button type="submit" disabled={busy}>Schedule required update</button>
-        </form>
-        {data.updates.length === 0 ? <p>No mandatory updates are scheduled.</p> : <ol className="timeline">{data.updates.map((item) => <li key={item.id}><strong>Update {item.sequence} · {item.status.replaceAll('_', ' ')}</strong><p>{item.instruction}</p><small>Due {dateText(item.dueAt)}{item.missedAt ? ` · missed ${dateText(item.missedAt)}` : ''}{item.nextAction ? ` · next: ${item.nextAction}` : ''}</small>{item.report && <p>Lawyer report: {item.report}</p>}</li>)}</ol>}
-      </section>
+      {paymentAssignments.length > 0 && <div className="block"><h3 id="payment-title"><Bi en="Payment status" bn="পেমেন্টের অবস্থা" /></h3>
+        <p className="muted"><Bi en="Status record only. No money moves here." bn="শুধু অবস্থার রেকর্ড। এখানে টাকা লেনদেন হয় না।" /></p>
+        <ul className="plain-list">{paymentAssignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong> {item.payment ? <><Term code={item.payment.stage} /> · <Badge code={item.payment.status} /></> : <span className="muted">{bi('Nothing recorded', 'কিছু লেখা নেই')}</span>}{item.payment && <p><small>{item.payment.reason}</small></p>}</div></li>)}</ul>
+        <AddForm en="Record payment status" bn="পেমেন্টের অবস্থা লিখুন">
+          <form onSubmit={recordPayment} className="form-stack inline-form">
+            <label htmlFor="payment-assignment"><Bi en="Lawyer" bn="আইনজীবী" /></label><select id="payment-assignment" value={paymentAssignmentId || paymentAssignments[0].id} onChange={(event) => setPaymentAssignmentId(event.target.value)}>{paymentAssignments.map((item) => <option key={item.id} value={item.id}>{item.lawyerName} · {say(item.status)}</option>)}</select>
+            <label htmlFor="payment-stage"><Bi en="Work stage" bn="কাজের ধাপ" /></label><select id="payment-stage" value={paymentStage} onChange={(event) => setPaymentStage(event.target.value)}>{['CASE_PREPARATION', 'HEARING_ATTENDANCE', 'CLAIM_REVIEW', 'RECONCILIATION'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+            <label htmlFor="payment-status"><Bi en="Status" bn="অবস্থা" /></label><select id="payment-status" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>{['SUBMITTED', 'UNDER_REVIEW', 'RECONCILED', 'PAYMENT_RECORDED', 'DISPUTED', 'NOT_RECORDED'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+            <label htmlFor="payment-reason"><Bi en="Note" bn="নোট" /></label><textarea id="payment-reason" value={paymentReason} onChange={(event) => setPaymentReason(event.target.value)} minLength="10" maxLength="500" required />
+            <button type="submit" disabled={busy}><Bi en="Save payment status" bn="অবস্থা সংরক্ষণ" /></button>
+          </form>
+        </AddForm>
+      </div>}
 
-      <section aria-labelledby="payment-title"><h3 id="payment-title">Stage-based payment reconciliation</h3>
-        <p className="muted">Record the stage and review state. This is not a payment instruction and does not decide a recoverable amount.</p>
-        <ul className="plain-list">{paymentAssignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong><p>Assignment {item.status.toLowerCase()}{item.payment ? ` · ${item.payment.stage.replaceAll('_', ' ')} · ${item.payment.status.replaceAll('_', ' ')}` : ' · no stage status recorded'}</p>{item.payment && <small>{item.payment.reason}</small>}</div></li>)}</ul>
-        {paymentAssignments.length > 0 && <form onSubmit={recordPayment} className="form-stack">
-          <label htmlFor="payment-assignment">Panel work to reconcile</label><select id="payment-assignment" value={paymentAssignmentId || paymentAssignments[0].id} onChange={(event) => setPaymentAssignmentId(event.target.value)}>{paymentAssignments.map((item) => <option key={item.id} value={item.id}>{item.lawyerName} · {item.status.toLowerCase()}</option>)}</select>
-          <label htmlFor="payment-stage">Work stage</label><select id="payment-stage" value={paymentStage} onChange={(event) => setPaymentStage(event.target.value)}><option value="CASE_PREPARATION">Case preparation</option><option value="HEARING_ATTENDANCE">Hearing attendance</option><option value="CLAIM_REVIEW">Claim review</option><option value="RECONCILIATION">Reconciliation</option></select>
-          <label htmlFor="payment-status">Recorded status</label><select id="payment-status" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}><option value="SUBMITTED">Submitted</option><option value="UNDER_REVIEW">Under review</option><option value="RECONCILED">Reconciled</option><option value="PAYMENT_RECORDED">Payment recorded (external status only)</option><option value="DISPUTED">Disputed</option><option value="NOT_RECORDED">Not recorded</option></select>
-          <label htmlFor="payment-reason">Reconciliation note</label><textarea id="payment-reason" value={paymentReason} onChange={(event) => setPaymentReason(event.target.value)} minLength="10" maxLength="500" required />
-          <button type="submit" disabled={busy}>Record payment status</button>
-        </form>}
-      </section>
-    </div>}
-
-    <section aria-labelledby="change-title"><h3 id="change-title">Applicant lawyer-change requests</h3>
-      {data.changeRequests.length === 0 ? <p>No applicant change request is waiting.</p> : <ul className="plain-list">{data.changeRequests.map((item) => <li key={item.id}><div><strong>{item.status.replaceAll('_', ' ')} · {item.channel}</strong><p>{item.reason}</p><small>Recorded {dateText(item.createdAt)}{item.reviewedAt ? ` · reviewed ${dateText(item.reviewedAt)}` : ''}{item.reviewReason ? ` · review reason: ${item.reviewReason}` : ''}</small>
-        {item.status === 'OPEN' && <><label htmlFor={`request-reason-${item.id}`}>DLAO review reason</label><textarea id={`request-reason-${item.id}`} value={reviewReasons[item.id] || ''} onChange={(event) => setReviewReasons((current) => ({ ...current, [item.id]: event.target.value }))} minLength="10" maxLength="500" /><div className="choice-row"><button type="button" disabled={busy || (reviewReasons[item.id] || '').trim().length < 10} onClick={() => reviewRequest(item.id, 'APPROVE')}>Approve request</button><button type="button" className="secondary-button" disabled={busy || (reviewReasons[item.id] || '').trim().length < 10} onClick={() => reviewRequest(item.id, 'DECLINE')}>Decline with reason</button></div></>}
-      </div></li>)}</ul>}
-      <p className="muted">Approving a request does not reassign the lawyer. The DLAO must separately choose and offer a replacement; the existing lawyer remains active until the replacement accepts.</p>
-    </section>
-  </section>
+      <div className="block"><h3 id="change-title"><Bi en="Lawyer change requests" bn="আইনজীবী বদলের অনুরোধ" /></h3>
+        {data.changeRequests.length === 0 ? <p className="muted">{bi('None', 'নেই')}</p> : <ul className="plain-list">{data.changeRequests.map((item) => <li key={item.id}><div><Badge code={item.status} /> <Term code={item.channel} /><p>{item.reason}</p><small>{when(item.createdAt)}{item.reviewReason ? ` · ${item.reviewReason}` : ''}</small>
+          {item.status === 'OPEN' && <><label htmlFor={`request-reason-${item.id}`}><Bi en="Review reason" bn="পর্যালোচনার কারণ" /></label><textarea id={`request-reason-${item.id}`} value={reviewReasons[item.id] || ''} onChange={(event) => setReviewReasons((current) => ({ ...current, [item.id]: event.target.value }))} minLength="10" maxLength="500" /><div className="choice-row"><button type="button" disabled={busy || (reviewReasons[item.id] || '').trim().length < 10} onClick={() => reviewRequest(item.id, 'APPROVE')}><Bi en="Approve" bn="অনুমোদন" /></button><button type="button" className="secondary-button" disabled={busy || (reviewReasons[item.id] || '').trim().length < 10} onClick={() => reviewRequest(item.id, 'DECLINE')}><Bi en="Decline" bn="প্রত্যাখ্যান" /></button></div></>}
+        </div></li>)}</ul>}
+        <p className="muted"><Bi en="Approving does not change the lawyer. The current lawyer stays until a new one accepts." bn="অনুমোদনে আইনজীবী বদলায় না। নতুন কেউ গ্রহণ না করা পর্যন্ত বর্তমান আইনজীবী থাকবেন।" /></p>
+      </div>
+    </>}
+  </Panel>
 }

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { signIn } from './support.js'
+import { expand, signIn } from './support.js'
 
 test('Step 7 Nuching offline intake survives loss, syncs once, resolves a conflict, and has a cited document briefing', async ({ page, request }) => {
   test.setTimeout(60000)
@@ -9,7 +9,7 @@ test('Step 7 Nuching offline intake survives loss, syncs once, resolves a confli
   await page.getByLabel('Local draft passphrase').fill('FictionalSecretPhrase!')
   await page.getByRole('button', { name: 'Load fictional Nuching example' }).click()
   await page.getByLabel('Applicant name').fill('Fictional Nuching Offline 1')
-  await expect(page.getByText(/DRAFT/).first()).toBeVisible()
+  await expect(page.locator('.plain-list li').filter({ hasText: 'Draft' }).first()).toBeVisible()
 
   await page.context().setOffline(true)
   await expect(page.getByRole('status').filter({ hasText: 'Connection: offline' })).toBeVisible()
@@ -20,7 +20,7 @@ test('Step 7 Nuching offline intake survives loss, syncs once, resolves a confli
     await page.getByLabel('Applicant name').fill(`Fictional Nuching Offline ${number}`)
     await page.getByRole('button', { name: 'Queue encrypted application' }).click()
   }
-  await expect(page.getByText(/QUEUED/)).toHaveCount(3)
+  await expect(page.locator('.plain-list li').filter({ hasText: 'Queued' })).toHaveCount(3)
   await page.getByRole('button', { name: 'Verify local integrity' }).click()
   await expect(page.getByRole('status').filter({ hasText: '3 local encrypted drafts verified' })).toBeVisible()
 
@@ -51,7 +51,7 @@ test('Step 7 Nuching offline intake survives loss, syncs once, resolves a confli
   await expect(page.getByRole('status').filter({ hasText: 'Human resolution recorded' })).toBeVisible()
   await expect(page.getByText('No local drafts.')).toBeVisible()
   await page.getByRole('button', { name: 'Load fictional Nuching example' }).click()
-  await expect(page.getByText(/DRAFT/).first()).toBeVisible()
+  await expect(page.locator('.plain-list li').filter({ hasText: 'Draft' }).first()).toBeVisible()
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByRole('heading', { name: 'One record, every handover.' })).toBeVisible()
   const remaining = await page.evaluate(() => new Promise((resolve, reject) => {
@@ -68,20 +68,22 @@ test('Step 7 Nuching offline intake survives loss, syncs once, resolves a confli
   await signIn(page, 'DLAO_OFFICER')
   await page.getByLabel('Application or Case ID').fill(applicationId)
   await page.getByRole('button', { name: 'Find record' }).click()
-  await expect(page.getByRole('heading', { name: 'Assisted-intake provenance' })).toBeVisible()
+  await expand(page, /^Assisted intake/)
   await expect(page.getByText('Fictional Marma translator')).toBeVisible()
+  await expand(page, /^Document briefing/)
   await page.getByRole('button', { name: 'Upload six fictional sample documents' }).click()
   await expect(page.getByText('Six fictional documents uploaded.')).toBeVisible({ timeout: 30000 })
-  await page.getByRole('button', { name: 'Generate provisional briefing' }).click()
-  const briefing = page.getByRole('heading', { name: 'Briefing: proposed' }).locator('..')
+  await page.getByRole('button', { name: 'Generate briefing' }).click()
+  const briefing = page.getByRole('heading', { name: /^Briefing.*Proposed/ }).locator('..')
   await expect(briefing).toBeVisible()
   await expect(briefing.getByText('Witness or other supporting record')).toBeVisible()
   await expect(briefing.getByText('land deed unreadable')).toBeVisible()
   await expect(briefing.getByText(/identity note, line 1/)).toBeVisible()
   await page.getByLabel('Officer verification reason').fill('I checked the cited fictional lines and the listed missing and unreadable items.')
   await page.getByRole('button', { name: 'Approve briefing accuracy only' }).click()
-  await expect(page.getByRole('heading', { name: 'Briefing: approved' })).toBeVisible()
-  await expect(page.getByText('DOCUMENT BRIEFING APPROVED', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /^Briefing.*Approved/ })).toBeVisible()
+  await expand(page, /^History/)
+  await expect(page.getByRole('region', { name: /^History/ }).getByText(/Document briefing approved/)).toBeVisible()
 })
 
 test('Step 7 assisted intake remains labeled and keyboard reachable on a narrow screen', async ({ page }) => {

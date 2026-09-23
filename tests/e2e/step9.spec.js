@@ -1,6 +1,6 @@
 /* global process */
 import { expect, test } from '@playwright/test'
-import { signIn } from './support.js'
+import { expand, signIn } from './support.js'
 
 test('Step 9 Malek: panel worklist, late updates, accessible status, human hold review, and payment status', async ({ page, request }) => {
   test.setTimeout(120000)
@@ -52,7 +52,7 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
   const panelPage = await page.context().newPage()
   await signIn(panelPage, 'PANEL_LAWYER')
   await panelPage.getByRole('link', { name: new RegExp(caseId) }).click()
-  await expect(panelPage.getByText(/Update 1 · MISSED/)).toBeVisible()
+  await expect(panelPage.locator('.plain-list li').filter({ hasText: /Update 1/ })).toContainText('Missed')
   await panelPage.getByLabel('Progress report').first().fill('The fictional file was reviewed; no confidential details were added.')
   await panelPage.getByLabel('Next step').first().fill('The DLAO will confirm the safe next step before travel.')
   await panelPage.getByRole('button', { name: 'Submit progress update' }).first().click()
@@ -61,21 +61,22 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
 
   const officePage = await page.context().newPage()
   await signIn(officePage, 'DLAO_OFFICER')
-  await expect(officePage.getByRole('link', { name: /LAWYER UPDATE OVERDUE/ })).toBeVisible()
+  await expect(officePage.getByRole('link', { name: /Lawyer update overdue/ })).toBeVisible()
   await officePage.getByLabel('Application or Case ID').fill(applicationId)
   await officePage.getByRole('button', { name: 'Find record' }).click()
   await expect(officePage.getByRole('heading', { name: applicationId })).toBeVisible()
-  await expect(officePage.getByText(/Temporary new-assignment hold · human review required/)).toBeVisible()
-  await expect(officePage.getByText(/No misconduct finding or payment recovery has been made/)).toBeVisible()
-  await officePage.getByLabel('Human hold-review reason').fill('Continue the temporary hold pending human review.')
+  await expect(officePage.getByText(/New assignments on hold: review needed/)).toBeVisible()
+  await expect(officePage.getByText(/No misconduct finding/)).toBeVisible()
+  await officePage.getByLabel('Hold review reason').fill('Continue the temporary hold pending human review.')
   await officePage.getByRole('button', { name: 'Continue hold' }).click()
-  await expect(officePage.getByRole('status').filter({ hasText: 'continued the temporary hold' })).toBeVisible()
+  await expect(officePage.getByRole('status').filter({ hasText: 'Hold continued' })).toBeVisible()
 
-  const payment = officePage.getByRole('heading', { name: 'Stage-based payment reconciliation' }).locator('..')
+  const payment = officePage.getByRole('heading', { name: /^Payment status/ }).locator('..')
+  await expand(payment, 'Record payment status')
   await payment.getByLabel('Work stage').selectOption('HEARING_ATTENDANCE')
-  await payment.getByLabel('Recorded status').selectOption('UNDER_REVIEW')
-  await payment.getByLabel('Reconciliation note').fill('Fictional attendance entry for reconciliation only.')
-  await payment.getByRole('button', { name: 'Record payment status' }).click()
+  await payment.getByLabel(/^Status/).selectOption('UNDER_REVIEW')
+  await payment.getByLabel(/^Note/).fill('Fictional attendance entry for reconciliation only.')
+  await payment.getByRole('button', { name: 'Save payment status' }).click()
   await expect(officePage.getByRole('status').filter({ hasText: 'No money moved' })).toBeVisible()
 
   const helplinePage = await page.context().newPage()

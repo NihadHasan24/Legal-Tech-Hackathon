@@ -4,6 +4,7 @@ import { steps } from '../../client/src/utils/voiceScript.js'
 // The E2E server runs with VOICE_AI=off, so speaking an answer hits a real 503 from our own API.
 test('when voice understanding is unavailable, the caller keeps answering by keyboard', async ({ page }) => {
   await page.goto('/voice')
+  await page.getByRole('button', { name: 'বাংলা', exact: true }).click()
   await page.getByRole('button', { name: 'কল করুন', exact: true }).click()
   await expect(page.getByRole('heading', { name: steps.urgent.prompt })).toBeFocused()
   await page.keyboard.press('2') // no one is in danger; choices never go through the AI

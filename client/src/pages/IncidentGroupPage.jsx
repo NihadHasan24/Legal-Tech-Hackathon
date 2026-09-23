@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../services/api.js'
+import { Badge, Bi, bi, num } from '../components/Bi.jsx'
 
 export default function IncidentGroupPage({ session }) {
   const { groupId } = useParams()
@@ -27,31 +28,32 @@ export default function IncidentGroupPage({ session }) {
     setNotice('')
     try {
       await api(`/api/incidents/${groupId}/evidence`, { token: session.token, method: 'POST', body: { documentId, reason } })
-      setNotice('Existing standard document reference added. No document copy was created.')
+      setNotice(bi('Evidence reference added. No document copy was created.', 'প্রমাণের সূত্র যুক্ত হয়েছে। নথির কপি তৈরি হয়নি।'))
       setReason('')
       setRefresh((value) => value + 1)
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
 
-  if (!data) return <section aria-labelledby="group-title"><Link to="/">← Workspace</Link><h1 id="group-title">Related incident group</h1>{error ? <p role="alert" className="error">{error}</p> : <p role="status">Loading related incident group…</p>}</section>
+  const back = <Link to="/">← <Bi en="Workspace" bn="কর্মক্ষেত্র" /></Link>
+  if (!data) return <section aria-labelledby="group-title">{back}<h1 id="group-title"><Bi en="Related cases" bn="সম্পর্কিত মামলা" /></h1>{error ? <p role="alert" className="error">{error}</p> : <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}</section>
 
   return <section aria-labelledby="group-title">
-    <Link to="/">← Workspace</Link>
-    <p className="eyebrow">Related incidents · linked, not merged</p>
+    {back}
+    <p className="eyebrow"><Bi en="Related cases · linked, not merged" bn="সম্পর্কিত মামলা · যুক্ত, একীভূত নয়" /></p>
     <h1 id="group-title">{data.title}</h1>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
-    <p className="safety-note">{data.separationNotice}</p>
-    <section className="card" aria-labelledby="members-title"><h2 id="members-title">Separate Case records</h2>
-      <ul className="plain-list">{data.members.map((member) => <li key={member.applicationId}><div><strong>{member.applicantName}</strong><p>{member.caseId || 'Accepted Case ID unavailable'} · Application {member.applicationId}</p><Link to={`/applications/${member.applicationId}`}>Open this individual Case record</Link></div></li>)}</ul>
+    <p className="safety-note"><Bi en="Only linked standard evidence is shared. Facts, instructions, outcomes and restricted evidence stay on each case." bn="শুধু যুক্ত সাধারণ প্রমাণ ভাগ হয়। তথ্য, নির্দেশনা, ফলাফল ও সীমিত প্রমাণ প্রতিটি মামলায় আলাদা থাকে।" /></p>
+    <section className="card" aria-labelledby="members-title"><h2 id="members-title"><Bi en="Separate Case records" bn="আলাদা মামলার রেকর্ড" /></h2>
+      <ul className="plain-list">{data.members.map((member) => <li key={member.applicationId}><div><strong>{member.applicantName}</strong><p className="muted">{member.caseId || bi('No Case ID', 'মামলা নম্বর নেই')} · {member.applicationId}</p></div><Link to={`/applications/${member.applicationId}`}><Bi en="Open case" bn="মামলা খুলুন" /></Link></li>)}</ul>
     </section>
-    <section className="card" aria-labelledby="shared-evidence-title"><h2 id="shared-evidence-title">Common evidence (reference-linked)</h2>
-      {data.sharedEvidence.length === 0 && <p>No standard evidence has been shared with this group.</p>}
-      <ul className="plain-list">{data.sharedEvidence.map((document) => <li key={document.id}><div><strong>{document.label}</strong><p>One stored document · source Case {document.sourceCaseId || 'unavailable'} · version {document.currentVersion} · {document.qualityState.replaceAll('_', ' ').toLowerCase()}</p>{document.textContent && <details><summary>Read common evidence text</summary><pre>{document.textContent}</pre></details>}</div></li>)}</ul>
-      {data.availableDocuments.length > 0 && <form onSubmit={share} className="form-stack">
-        <label htmlFor="shared-document">Readable standard document from a member Case</label><select id="shared-document" value={documentId || data.availableDocuments[0].id} onChange={(event) => setDocumentId(event.target.value)}>{data.availableDocuments.map((document) => <option key={document.id} value={document.id}>{document.label} · source {document.sourceCaseId}</option>)}</select>
-        <label htmlFor="shared-evidence-reason">Reason this common evidence is relevant</label><textarea id="shared-evidence-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="10" maxLength="1000" required />
-        <button type="submit" disabled={busy}>Share existing evidence reference</button>
+    <section className="card" aria-labelledby="shared-evidence-title"><h2 id="shared-evidence-title"><Bi en="Shared evidence" bn="যৌথ প্রমাণ" /></h2>
+      {data.sharedEvidence.length === 0 && <p className="muted"><Bi en="Nothing shared yet." bn="এখনো কিছু ভাগ করা হয়নি।" /></p>}
+      <ul className="plain-list">{data.sharedEvidence.map((document) => <li key={document.id}><div><strong>{document.label}</strong> <Badge code={document.qualityState} /><p className="muted"><Bi en="From" bn="উৎস" /> {document.sourceCaseId || '—'} · <Bi en="version" bn="সংস্করণ" /> {num(document.currentVersion)}</p>{document.textContent && <details><summary><Bi en="Read common evidence text" bn="প্রমাণের লেখা পড়ুন" /></summary><pre>{document.textContent}</pre></details>}</div></li>)}</ul>
+      {data.availableDocuments.length > 0 && <form onSubmit={share} className="form-stack inline-form">
+        <label htmlFor="shared-document"><Bi en="Readable document from a member case" bn="সদস্য মামলার পাঠযোগ্য নথি" /></label><select id="shared-document" value={documentId || data.availableDocuments[0].id} onChange={(event) => setDocumentId(event.target.value)}>{data.availableDocuments.map((document) => <option key={document.id} value={document.id}>{document.label} · {document.sourceCaseId}</option>)}</select>
+        <label htmlFor="shared-evidence-reason"><Bi en="Reason this common evidence is relevant" bn="কেন এই প্রমাণ সবার জন্য প্রাসঙ্গিক" /></label><textarea id="shared-evidence-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="10" maxLength="1000" required />
+        <button type="submit" disabled={busy}><Bi en="Share existing evidence reference" bn="প্রমাণের সূত্র ভাগ করুন" /></button>
       </form>}
     </section>
   </section>

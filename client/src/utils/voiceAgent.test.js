@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { appendTranscript, applyExtraction, parseAnswer } from './voiceAgent.js'
-import { answer, payload, startCall } from './voiceScript.js'
+import { answer, correct, nextField, payload, startCall } from './voiceScript.js'
 
 
 test('extracted answers are validated against the same script the keyboard uses', () => {
@@ -20,6 +20,20 @@ test('extracted answers are validated against the same script the keyboard uses'
   expect(Object.keys(call.answers)).not.toContain('role')
 })
 
+test('a spoken answer fills only the question being asked', () => {
+  let call = startCall()
+  for (const [field, value] of [['urgent', false], ['callerRole', 'SELF']]) call = answer(call, field, value)
+  // Mentioning the problem while giving a name does not skip the problem question.
+  let result = applyExtraction(call, { applicantName: 'Moyuri', problem: 'স্বামী মারধর করে।', district: 'Joypurhat' })
+  expect(result.accepted).toEqual(['applicantName'])
+  call = answer(result.call, 'identityDocument', 'UNKNOWN')
+  expect(nextField(call)).toBe('problem')
+  // Telling the problem does not re-answer the keypad question, so it gets no AI flag and no voice clip.
+  result = applyExtraction(call, { callerRole: 'SELF', problem: 'আমি নিজের জন্য ফোন করছি। স্বামী মারধর করে।' })
+  expect(result.accepted).toEqual(['problem'])
+  expect(result.call.aiFields).not.toContain('callerRole')
+})
+
 test('a spoken correction is tracked and Bangla digits become a usable phone number', () => {
   let call = startCall()
   for (const [field, value] of [['urgent', false], ['callerRole', 'SELF'], ['applicantName', 'Moyuri'], ['identityDocument', 'UNAVAILABLE'],
@@ -28,7 +42,7 @@ test('a spoken correction is tracked and Bangla digits become a usable phone num
     call = applyExtraction(call, { [field]: value }).call
   }
   expect(call.answers.contactValue).toBe('01700000000')
-  call = applyExtraction(call, { district: 'Joypurhat' }).call
+  call = applyExtraction(correct(call, 'district'), { district: 'Joypurhat' }).call
   const body = payload(call, { confirmation: 'VOICE', transcript: [{ speaker: 'CALLER', text: 'আমার সমস্যা…' }] })
   expect(body.answers.district).toBe('Joypurhat')
   expect(body.correctedFields).toEqual(['district'])

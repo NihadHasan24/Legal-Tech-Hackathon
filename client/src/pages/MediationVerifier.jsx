@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../services/api.js'
 import { verifySettlement } from '../utils/settlementCrypto.js'
+import { Bi, Term, bi, num, when } from '../components/Bi.jsx'
+
+const valid = (ok) => ok ? bi('valid', 'বৈধ') : bi('FAILED', 'ব্যর্থ')
 
 export default function MediationVerifier({ session }) {
   const { applicationId } = useParams()
@@ -46,21 +49,21 @@ export default function MediationVerifier({ session }) {
   }
 
   return <section aria-labelledby="verification-title">
-    <Link to={`/applications/${applicationId}`}>← Mediation record</Link>
-    <p className="eyebrow">Independent integrity check · Application {applicationId}</p>
-    <h1 id="verification-title">Settlement signature verifier</h1>
-    <p className="safety-note"><strong>Cryptographic validity does not by itself prove legal identity, capacity, informed consent, or enforceability.</strong></p>
+    <Link to={`/applications/${applicationId}`}>← <Bi en="Mediation record" bn="মধ্যস্থতার রেকর্ড" /></Link>
+    <p className="eyebrow"><Bi en="Integrity check" bn="সত্যতা যাচাই" /> · {applicationId}</p>
+    <h1 id="verification-title"><Bi en="Signature verifier" bn="স্বাক্ষর যাচাই" /></h1>
+    <p className="safety-note"><strong><Bi en="A valid signature does not prove identity, capacity, consent or legal effect." bn="বৈধ স্বাক্ষর পরিচয়, সক্ষমতা, সম্মতি বা আইনি কার্যকারিতা প্রমাণ করে না।" /></strong></p>
     {error && <p role="alert" className="error">{error}</p>}
-    {!mediation && !error && <p role="status">Loading signed settlement…</p>}
-    {mediation && !mediation.draft && <p>No settlement draft is recorded on this Case.</p>}
+    {!mediation && !error && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
+    {mediation && !mediation.draft && <p><Bi en="No settlement draft on this case." bn="এই মামলায় মীমাংসার খসড়া নেই।" /></p>}
     {mediation?.draft && <section className="card" aria-labelledby="document-title">
-      <h2 id="document-title">{mediation.caseId} · draft version {mediation.draft.version}</h2>
-      <p>Template: {mediation.draft.template.replaceAll('_', ' ')} · legal state: {mediation.legalEffectState.replaceAll('_', ' ')}</p>
-      <dl className="details">{mediation.draft.sections.map((section) => <div key={section.key}><dt>{section.label}</dt><dd>{section.text}{section.aiFilled ? ' · AI-filled' : ''}</dd></div>)}</dl>
-      <ol className="plain-list">{mediation.signatures.map((signature) => <li key={signature.signerRole}>{signature.signerRole.replaceAll('_', ' ')} · received {new Date(signature.receivedAt).toLocaleString()} · device-reported {new Date(signature.clientSignedAt).toLocaleString()}</li>)}</ol>
-      <div className="choice-row"><button type="button" disabled={busy} onClick={verifyCurrent}>Verify this document on this device</button><button type="button" className="secondary-button" disabled={busy || mediation.signatures.length === 0} onClick={testChangedCopy}>Test a changed copy</button><button type="button" className="secondary-button" disabled={busy} onClick={verifyServer}>Verify independently on server</button></div>
-      {deviceResult && <section role="status" aria-live="polite"><h3>Browser verification</h3><p>{deviceResult.allValid ? 'All three signatures match this document version.' : 'Verification failed or fewer than three signatures are present.'} Document SHA-256: <code>{deviceResult.documentHash}</code></p><ul>{deviceResult.signatures.map((signature) => <li key={signature.signerRole}>{signature.signerRole.replaceAll('_', ' ')}: {signature.valid ? 'valid' : 'FAILED'} · hash {signature.hashMatches ? 'matches' : 'does not match'} · signature {signature.cryptographicallyValid ? 'valid' : 'invalid'}</li>)}</ul></section>}
-      {serverResult && <section role="status" aria-live="polite"><h3>Server verification</h3><p>{serverResult.allValid ? 'All three stored signatures verify.' : 'Verification failed or fewer than three signatures are present.'}</p><ul>{serverResult.signatures.map((signature) => <li key={signature.signerRole}>{signature.signerRole.replaceAll('_', ' ')}: {signature.valid ? 'valid' : 'FAILED'}</li>)}</ul></section>}
+      <h2 id="document-title">{mediation.caseId} · <Bi en="draft" bn="খসড়া" /> v{num(mediation.draft.version)}</h2>
+      <p className="muted"><Term code={mediation.draft.template} /> · <Term code={mediation.legalEffectState} /></p>
+      <dl className="details compact">{mediation.draft.sections.map((section) => <div key={section.key}><dt>{section.label}</dt><dd>{section.text}{section.aiFilled ? ` · ${bi('AI', 'এআই')}` : ''}</dd></div>)}</dl>
+      <ol className="plain-list">{mediation.signatures.map((signature) => <li key={signature.signerRole}><span><strong><Term code={signature.signerRole} /></strong> · {when(signature.receivedAt)}</span></li>)}</ol>
+      <div className="choice-row"><button type="button" disabled={busy} onClick={verifyCurrent}><Bi en="Verify this document on this device" bn="এই ডিভাইসে যাচাই" /></button><button type="button" className="secondary-button" disabled={busy || mediation.signatures.length === 0} onClick={testChangedCopy}><Bi en="Test a changed copy" bn="বদলানো কপি পরীক্ষা" /></button><button type="button" className="secondary-button" disabled={busy} onClick={verifyServer}><Bi en="Verify on server" bn="সার্ভারে যাচাই" /></button></div>
+      {deviceResult && <section role="status" aria-live="polite"><h3><Bi en="Browser check" bn="ব্রাউজারে যাচাই" /></h3><p className={deviceResult.allValid ? 'success' : 'error'}>{deviceResult.allValid ? bi('All three signatures match this document version.', 'তিনটি স্বাক্ষরই এই সংস্করণের সাথে মেলে।') : bi('Verification failed or fewer than three signatures are present.', 'যাচাই ব্যর্থ বা তিনটির কম স্বাক্ষর আছে।')}</p><p className="muted">SHA-256: <code>{deviceResult.documentHash}</code></p><ul>{deviceResult.signatures.map((signature) => <li key={signature.signerRole}><Term code={signature.signerRole} />: {valid(signature.valid)} · <Bi en="hash" bn="হ্যাশ" /> {valid(signature.hashMatches)} · <Bi en="signature" bn="স্বাক্ষর" /> {valid(signature.cryptographicallyValid)}</li>)}</ul></section>}
+      {serverResult && <section role="status" aria-live="polite"><h3><Bi en="Server check" bn="সার্ভারে যাচাই" /></h3><p className={serverResult.allValid ? 'success' : 'error'}>{serverResult.allValid ? bi('All three stored signatures verify.', 'সংরক্ষিত তিনটি স্বাক্ষরই বৈধ।') : bi('Verification failed or fewer than three signatures are present.', 'যাচাই ব্যর্থ বা তিনটির কম স্বাক্ষর আছে।')}</p><ul>{serverResult.signatures.map((signature) => <li key={signature.signerRole}><Term code={signature.signerRole} />: {valid(signature.valid)}</li>)}</ul></section>}
     </section>}
   </section>
 }

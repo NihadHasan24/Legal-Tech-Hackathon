@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { signIn } from './support.js'
+import { expand, signIn } from './support.js'
 
 test('helpline intake becomes one reviewed DLAO case and provider shells stay bounded', async ({ page, request }) => {
   await page.goto('/')
@@ -20,7 +20,7 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   await expect(page.getByRole('heading', { name: applicationId })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Accept application' })).toBeDisabled()
   await page.getByLabel('Review outcome').selectOption('READY_FOR_DECISION')
-  await page.getByLabel('Reason', { exact: true }).fill('Officer reviewed the fictional helpline intake.')
+  await page.getByRole('region', { name: /^Decision/ }).getByLabel(/^Reason/).fill('Officer reviewed the fictional helpline intake.')
   await page.getByRole('button', { name: 'Record review' }).click()
   await expect(page.getByRole('button', { name: 'Accept application' })).toBeEnabled()
   await page.getByLabel('Decision reason').fill('Officer accepted the fictional reviewed application.')
@@ -28,7 +28,8 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   const caseText = page.getByText(/^CASE-\d{4}-\d{6}$/).first()
   await expect(caseText).toBeVisible()
   const caseId = await caseText.textContent()
-  await expect(page.getByText('APPLICATION ACCEPTED', { exact: true })).toBeVisible()
+  await expand(page, /^History/)
+  await expect(page.getByRole('region', { name: /^History/ }).getByText(/Application accepted/)).toBeVisible()
 
   await page.getByRole('link', { name: '← Workspace' }).click()
   await page.getByLabel('Application or Case ID').fill(caseId)

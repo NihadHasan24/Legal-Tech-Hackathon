@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { signIn } from './support.js'
+import { expand, signIn } from './support.js'
 
 test('Step 6 shared queue, audited human override, case support history, and safe helpline lookup', async ({ page, request }) => {
   await signIn(page, 'HELPLINE_AGENT')
@@ -29,15 +29,16 @@ test('Step 6 shared queue, audited human override, case support history, and saf
   await expect(page.getByRole('link', { name: new RegExp(applicationId) })).toContainText('An urgent fact is recorded')
   await page.getByRole('link', { name: new RegExp(applicationId) }).click()
   await page.getByLabel('Priority decision').selectOption('ROUTINE')
-  await page.getByLabel('Override reason').fill('Officer reviewed the fictional urgent indicator and chose routine handling.')
-  await page.getByRole('button', { name: 'Record priority override' }).click()
-  await expect(page.getByText('HUMAN PRIORITY OVERRIDE', { exact: true })).toBeVisible()
+  await page.getByRole('region', { name: /^Priority/ }).getByLabel(/^Reason/).fill('Officer reviewed the fictional urgent indicator and chose routine handling.')
+  await page.getByRole('button', { name: 'Save priority' }).click()
+  await expand(page, /^History/)
+  await expect(page.getByRole('region', { name: /^History/ }).getByText(/Priority set by officer/)).toBeVisible()
 
   await page.getByRole('button', { name: 'Sign out' }).click()
   await signIn(page, 'CASE_SUPPORT')
   await page.getByLabel('Search shown history').fill(applicationId)
   await page.getByRole('link', { name: new RegExp(applicationId) }).click()
-  await expect(page.getByRole('heading', { name: 'Case reconstruction' })).toBeVisible()
-  await expect(page.getByText('HUMAN PRIORITY OVERRIDE', { exact: true })).toBeVisible()
-  await expect(page.getByText('STATUS LOOKUP', { exact: false }).first()).toBeVisible()
+  const history = page.getByRole('region', { name: /^History/ })
+  await expect(history.getByText(/Priority set by officer/)).toBeVisible()
+  await expect(history.getByText(/Helpline status lookup/).first()).toBeVisible()
 })

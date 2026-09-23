@@ -11,6 +11,7 @@ import MediationPage from './pages/MediationPage.jsx'
 import MediationVerifier from './pages/MediationVerifier.jsx'
 import { api } from './services/api.js'
 import { clearOfflineDrafts, resumeOfflineDrafts } from './utils/offlineDrafts.js'
+import { bi, setLang, useLang } from './components/Bi.jsx'
 
 function SignIn({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -27,7 +28,7 @@ function SignIn({ onLogin }) {
       const account = await api(`/api/auth/demo-credentials/${role}`)
       setUsername(account.username)
       setPassword(account.password)
-      setStatus(`${label} account filled. Select Sign in to continue.`)
+      setStatus(bi(`${label} account filled. Select Sign in to continue.`, `${label} অ্যাকাউন্ট পূরণ হয়েছে। চালিয়ে যেতে সাইন ইন চাপুন।`))
     } catch (failure) {
       setError(failure.message)
     } finally {
@@ -50,20 +51,20 @@ function SignIn({ onLogin }) {
 
   return (
     <section className="login-panel" aria-labelledby="welcome-title">
-      <h1 id="welcome-title">One record, every handover.</h1>
-      <p className="citizen-door">Need voice support? <Link to="/voice">Start a voice intake</Link></p>
+      <h1 id="welcome-title">{bi('One record, every handover.', 'একটি রেকর্ড, প্রতিটি হস্তান্তরে।')}</h1>
+      <p className="citizen-door">{bi('Need voice support?', 'ফোনে সাহায্য দরকার?')} <Link to="/voice">{bi('Start a voice intake', 'ভয়েসে আবেদন শুরু করুন')}</Link></p>
       <form onSubmit={submit} className="form-stack">
-        <label htmlFor="username">{import.meta.env.PROD ? 'Staff username' : 'Demo username'}</label>
+        <label htmlFor="username">{import.meta.env.PROD ? bi('Staff username', 'কর্মীর ইউজারনেম') : bi('Demo username', 'ডেমো ইউজারনেম')}</label>
         <input id="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required />
-        <label htmlFor="password">{import.meta.env.PROD ? 'Staff password' : 'Demo password'}</label>
+        <label htmlFor="password">{import.meta.env.PROD ? bi('Staff password', 'কর্মীর পাসওয়ার্ড') : bi('Demo password', 'ডেমো পাসওয়ার্ড')}</label>
         <input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
         {error && <p role="alert" className="error">{error}</p>}
-        <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <button type="submit" disabled={busy}>{busy ? bi('Signing in…', 'সাইন ইন হচ্ছে…') : bi('Sign in', 'সাইন ইন')}</button>
         {!import.meta.env.PROD && <fieldset className="demo-roles">
-          <legend>Quick fill a role</legend>
+          <legend>{bi('Quick fill a role', 'দ্রুত একটি ভূমিকা পূরণ করুন')}</legend>
           <div className="demo-role-buttons">
-            <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('DLAO_OFFICER', 'DLAO Officer')}>DLAO Officer</button>
-            <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('UDC_OPERATOR', 'UDC Operator')}>UDC Operator</button>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('DLAO_OFFICER', bi('DLAO Officer', 'ডিএলএও কর্মকর্তা'))}>{bi('DLAO Officer', 'ডিএলএও কর্মকর্তা')}</button>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => fillDemoAccount('UDC_OPERATOR', bi('UDC Operator', 'ইউডিসি অপারেটর'))}>{bi('UDC Operator', 'ইউডিসি অপারেটর')}</button>
           </div>
           <p role="status" className="visually-hidden">{status}</p>
         </fieldset>}
@@ -74,6 +75,7 @@ function SignIn({ onLogin }) {
 
 export default function App() {
   const [session, setSession] = useState(null)
+  const lang = useLang()
   const [lightMode, setLightMode] = useState(() => typeof localStorage !== 'undefined' && localStorage.getItem('dlas-light-mode') === '1')
   const [installPrompt, setInstallPrompt] = useState(null)
   const { pathname } = useLocation()
@@ -86,6 +88,8 @@ export default function App() {
     document.documentElement.dataset.lightMode = lightMode ? 'on' : 'off'
     localStorage.setItem('dlas-light-mode', lightMode ? '1' : '0')
   }, [lightMode])
+
+  useEffect(() => { document.documentElement.lang = lang }, [lang])
 
   useEffect(() => {
     if (previousPath.current !== pathname) document.getElementById('main')?.focus()
@@ -107,7 +111,7 @@ export default function App() {
 
   async function signOut() {
     const token = session.token
-    try { await clearOfflineDrafts() } catch { window.alert('Local drafts could not be cleared. Do not leave this browser on a shared device.') }
+    try { await clearOfflineDrafts() } catch { window.alert(bi('Local drafts could not be cleared. Do not leave this browser on a shared device.', 'এই ডিভাইসের খসড়া মোছা যায়নি। শেয়ার করা ডিভাইসে ব্রাউজারটি খোলা রেখে যাবেন না।')) }
     setSession(null)
     navigate('/')
     try { await api('/api/auth/logout', { token, method: 'POST' }) } catch { /* Browser session is already cleared if the network is unavailable. */ }
@@ -123,13 +127,17 @@ export default function App() {
 
   return (
     <>
-      <a className="skip-link" href="#main">Skip to main content</a>
+      <a className="skip-link" href="#main">{bi('Skip to main content', 'মূল অংশে যান')}</a>
       <header className="site-header">
-        <Link className="brand" to="/" aria-label={pathname === '/voice' ? 'DLAS voice intake home' : 'DLAS provider workspace home'}>DLAS <span>{pathname === '/voice' ? 'Voice intake' : 'Provider workspace'}</span></Link>
-        {pathname !== '/voice' && (session || pathname !== '/') && <span className="prototype-label">Prototype · fictional data</span>}
-        <button type="button" className="quiet-button" onClick={toggleLight}>{lightMode ? 'Normal mode' : 'Light mode'}</button>
-        {installPrompt && <button type="button" className="quiet-button" onClick={install}>Install app</button>}
-        {session && <div className="account"><span>{session.user.displayName}</span><button type="button" className="quiet-button" onClick={signOut}>Sign out</button></div>}
+        <Link className="brand" to="/" aria-label={pathname === '/voice' ? bi('DLAS voice intake home', 'DLAS ভয়েস আবেদনের শুরু') : bi('DLAS provider workspace home', 'DLAS কর্মক্ষেত্রের শুরু')}>DLAS <span>{pathname === '/voice' ? bi('Voice intake', 'ভয়েস আবেদন') : bi('Provider workspace', 'কর্মক্ষেত্র')}</span></Link>
+        {pathname !== '/voice' && (session || pathname !== '/') && <span className="prototype-label">{bi('Prototype · fictional data', 'প্রোটোটাইপ · কাল্পনিক তথ্য')}</span>}
+        <div className="lang-switch" role="group" aria-label="Language / ভাষা">
+          <button type="button" lang="bn" aria-pressed={lang === 'bn'} onClick={() => setLang('bn')}>বাংলা</button>
+          <button type="button" lang="en" aria-pressed={lang === 'en'} onClick={() => setLang('en')}>English</button>
+        </div>
+        <button type="button" className="quiet-button" onClick={toggleLight}>{lightMode ? bi('Normal mode', 'সাধারণ মোড') : bi('Light mode', 'হালকা মোড')}</button>
+        {installPrompt && <button type="button" className="quiet-button" onClick={install}>{bi('Install app', 'অ্যাপ ইনস্টল করুন')}</button>}
+        {session && <div className="account"><span>{session.user.displayName}</span><button type="button" className="quiet-button" onClick={signOut}>{bi('Sign out', 'সাইন আউট')}</button></div>}
       </header>
       <main id="main" className="app-main" tabIndex={-1}>
         <Routes>
