@@ -110,7 +110,8 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
     let applicant
     let citizenUserId = null
 
-    if (actor?.userId) {
+    // Only a citizen calling for themselves becomes the applicant; staff demos and representatives stay separate people.
+    if (!representative && actor?.assignments?.some(({ role }) => role === 'CITIZEN')) {
       const authUser = await User.findById(actor.userId).session(session)
       if (authUser) {
         citizenUserId = authUser._id.toString()

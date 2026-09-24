@@ -101,37 +101,13 @@ export default function RecordPage({ session }) {
 
   async function submitAcceptance(event) {
     event.preventDefault()
-    setError('')
-    setNotice('')
-    try {
-      if (data.record.reviewState !== 'READY_FOR_DECISION') {
-        const reviewPath = data.record.reviewState === 'PENDING_REVIEW'
-          ? `/api/applications/${applicationId}/review`
-          : `/api/applications/${applicationId}/review-override`
-        await api(reviewPath, {
-          token: session.token,
-          method: 'POST',
-          body: { reviewState: 'READY_FOR_DECISION', reason: 'Ready for acceptance decision.' },
-        })
-      }
-      const result = await api(`/api/applications/${applicationId}/accept`, {
-        token: session.token,
-        method: 'POST',
-        body: { reason: acceptReason || 'Application accepted by officer.' },
-      })
-      setNotice(bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
-      setRefresh((value) => value + 1)
-      setAcceptReason('')
-      return result
-    } catch (failure) { setError(failure.message); return null }
+    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason }, bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
+    if (result) setAcceptReason('')
   }
 
   async function submitPriority(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/priority-override`, {
-      priorityDecision,
-      reason: priorityReason || `Priority set to ${priorityDecision} by officer.`,
-    }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
+    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
     if (result) setPriorityReason('')
   }
 
@@ -242,7 +218,9 @@ export default function RecordPage({ session }) {
               </form>
               <form onSubmit={submitAcceptance} className="form-stack">
                 <h3><Bi en="2. Accept" bn="২. গ্রহণ" /></h3>
-                <button type="submit"><Bi en="Accept application" bn="আবেদন গ্রহণ করুন" /></button>
+                <label htmlFor="accept-reason"><Bi en="Decision reason" bn="সিদ্ধান্তের কারণ" /></label>
+                <textarea id="accept-reason" value={acceptReason} onChange={(event) => setAcceptReason(event.target.value)} minLength="10" maxLength="1000" required />
+                <button type="submit" disabled={record.reviewState !== 'READY_FOR_DECISION'}><Bi en="Accept application" bn="আবেদন গ্রহণ করুন" /></button>
               </form>
             </div>
           </Panel>}
@@ -265,6 +243,7 @@ export default function RecordPage({ session }) {
             {record.urgencyReasons.length ? <><h3><Bi en="Why flagged" bn="কেন চিহ্নিত" /></h3><ul>{record.urgencyReasons.map((reason) => <li key={reason}>{tr(reason)}</li>)}</ul></> : <p><Bi en="No urgency signs recorded." bn="জরুরি পরিস্থিতির কোনো ইঙ্গিত নথিতে নেই।" /></p>}
             <form onSubmit={submitPriority} className="form-stack inline-form">
               <label htmlFor="priority-decision"><Bi en="Priority decision" bn="অগ্রাধিকারের সিদ্ধান্ত" /></label><select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}><option value="URGENT">{say('URGENT')}</option><option value="ROUTINE">{say('ROUTINE')}</option></select>
+              <label htmlFor="priority-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required />
               <button type="submit"><Bi en="Save priority" bn="অগ্রাধিকার সংরক্ষণ" /></button>
             </form>
           </Panel>}

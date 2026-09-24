@@ -6,6 +6,8 @@ import mongoose from 'mongoose'
 import app from './app.js'
 import * as models from './models/index.js'
 import { hashPassword } from './utils/password.js'
+import { submitVoiceIntake } from './services/applicationService.js'
+import { getSession } from './services/authService.js'
 
 const databaseName = `dlas_step2_test_${randomBytes(6).toString('hex')}`
 const server = createServer(app)
@@ -242,6 +244,14 @@ test('Step 4 voice intake keeps representative provenance, the recording notice,
   const facts = await models.CaseFact.find({ applicationId }).lean()
   assert.equal(facts.length, 4)
   assert.ok(facts.every((fact) => fact.sourceType === 'REPRESENTATIVE_REPORTED' && fact.callerConfirmed && !fact.applicantConfirmed && fact.sourcePersonId.equals(representation.representativePersonId)))
+  // Only a signed-in citizen calling for themselves is linked as the applicant.
+  const citizen = await actor('test4.citizen', 'CITIZEN')
+  const self = { ...ripon.answers, callerRole: 'SELF' }
+  for (const key of ['callerName', 'relationship', 'contactOwner']) delete self[key]
+  const linked = async (who, body) => (await submitVoiceIntake(body, await getSession(who.token))).authenticated
+  assert.equal(await linked(officer, ripon), false)
+  assert.equal(await linked(citizen, ripon), false)
+  assert.equal(await linked(citizen, { ...ripon, answers: self }), true)
   assert.equal((await models.Person.findById(representation.applicantPersonId).lean()).identityStatus, 'INCOMPLETE')
   assert.equal(await models.ConsentRecord.countDocuments({ applicationId }), 0)
   const profile = await models.SafeContactProfile.findOne({ applicationId }).lean()

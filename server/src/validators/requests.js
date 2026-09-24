@@ -36,8 +36,7 @@ export function validateSubmission(request, _response, next) {
 
 export function validateAcceptance(request, _response, next) {
   const value = body(request, ['reason'])
-  const reasonText = value.reason?.trim() ? value.reason : 'Application accepted by officer.'
-  value.reason = text(reasonText, 'Human decision reason', 10, 1000)
+  value.reason = text(value.reason, 'Human decision reason', 10, 1000)
   next()
 }
 
@@ -58,8 +57,7 @@ export function validateReviewOverride(request, _response, next) {
 export function validatePriorityOverride(request, _response, next) {
   const value = body(request, ['priorityDecision', 'reason'])
   if (!['URGENT', 'ROUTINE'].includes(value.priorityDecision)) fail('Priority decision is invalid.')
-  const reasonText = value.reason?.trim() ? value.reason : `Priority set to ${value.priorityDecision} by officer.`
-  value.reason = text(reasonText, 'Human override reason', 10, 1000)
+  value.reason = text(value.reason, 'Human override reason', 10, 1000)
   next()
 }
 
