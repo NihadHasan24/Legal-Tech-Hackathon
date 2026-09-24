@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { expand, signIn } from './support.js'
+import { expand, signIn, signOut } from './support.js'
 
 test('helpline intake becomes one reviewed DLAO case and provider shells stay bounded', async ({ page, request }) => {
   await page.goto('/')
@@ -14,7 +14,7 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   const applicationId = (await submitted.textContent()).match(/APP-\d{4}-\d{6}/)[0]
   await expect(page.getByText('No records are available to this role yet.')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Sign out' }).click()
+  await signOut(page)
   await signIn(page, 'DLAO_OFFICER')
   await page.getByRole('link', { name: new RegExp(applicationId) }).click()
   await expect(page.getByRole('heading', { name: applicationId })).toBeVisible()
@@ -40,7 +40,7 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   for (const href of new Set(links)) expect((await request.get(href)).ok(), `Internal link ${href} is dead`).toBeTruthy()
 
   for (const role of ['CASE_SUPPORT', 'UDC_OPERATOR', 'PANEL_LAWYER', 'MEDIATOR', 'RECEIVING_DLAO', 'CLAO']) {
-    await page.getByRole('button', { name: 'Sign out' }).click()
+    await signOut(page)
     await signIn(page, role)
     if (role !== 'CASE_SUPPORT') await expect(page.getByText(applicationId)).toHaveCount(0)
   }

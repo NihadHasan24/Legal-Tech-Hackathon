@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { expand, signIn } from './support.js'
+import { expand, signIn, signOut } from './support.js'
 
 test('Step 7 Nuching offline intake survives loss, syncs once, resolves a conflict, and has a cited document briefing', async ({ page, request }) => {
   test.setTimeout(60000)
@@ -52,7 +52,7 @@ test('Step 7 Nuching offline intake survives loss, syncs once, resolves a confli
   await expect(page.getByText('No local drafts.')).toBeVisible()
   await page.getByRole('button', { name: 'Load fictional Nuching example' }).click()
   await expect(page.locator('.plain-list li').filter({ hasText: 'Draft' }).first()).toBeVisible()
-  await page.getByRole('button', { name: 'Sign out' }).click()
+  await signOut(page)
   await expect(page.getByRole('heading', { name: 'One record, every handover.' })).toBeVisible()
   const remaining = await page.evaluate(() => new Promise((resolve, reject) => {
     const opened = indexedDB.open('dlas-offline-v1')

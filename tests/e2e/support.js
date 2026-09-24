@@ -17,8 +17,15 @@ export async function signIn(page, role) {
   const actor = JSON.parse(process.env.E2E_ACTORS)[role]
   await page.goto('/')
   await page.getByRole('button', { name: 'English', exact: true }).click()
-  await page.getByLabel('Demo username').fill(actor.username)
-  await page.getByLabel('Demo password').fill(actor.password)
-  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await page.getByRole('tab', { name: 'Officer' }).click()
+  await page.getByLabel('Officer ID').fill(actor.username)
+  await page.getByLabel('Password', { exact: true }).fill(actor.password)
+  await page.getByRole('button', { name: 'Sign In as Officer' }).click()
   await expect(page.getByRole('heading', { name: `${roleNames[role]} workspace` })).toBeVisible()
+}
+
+export async function signOut(page) {
+  await page.getByRole('button', { name: 'Account menu' }).click()
+  await page.getByRole('menuitem', { name: 'Sign out' }).click()
 }

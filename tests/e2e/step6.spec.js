@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { expand, signIn } from './support.js'
+import { expand, signIn, signOut } from './support.js'
 
 test('Step 6 shared queue, audited human override, case support history, and safe helpline lookup', async ({ page, request }) => {
   await signIn(page, 'HELPLINE_AGENT')
@@ -23,7 +23,7 @@ test('Step 6 shared queue, audited human override, case support history, and saf
   await page.getByRole('button', { name: 'Check permitted status' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'awaiting an officer decision' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Sign out' }).click()
+  await signOut(page)
   await signIn(page, 'DLAO_OFFICER')
   await page.getByLabel('Queue flag').selectOption('URGENT_RECOMMENDATION')
   await expect(page.getByRole('link', { name: new RegExp(applicationId) })).toContainText('An urgent fact is recorded')
@@ -34,7 +34,7 @@ test('Step 6 shared queue, audited human override, case support history, and saf
   await expand(page, /^History/)
   await expect(page.getByRole('region', { name: /^History/ }).getByText(/Priority set by officer/)).toBeVisible()
 
-  await page.getByRole('button', { name: 'Sign out' }).click()
+  await signOut(page)
   await signIn(page, 'CASE_SUPPORT')
   await page.getByLabel('Search shown history').fill(applicationId)
   await page.getByRole('link', { name: new RegExp(applicationId) }).click()
