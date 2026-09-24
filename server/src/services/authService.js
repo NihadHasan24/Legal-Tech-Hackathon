@@ -128,8 +128,11 @@ export async function getSession(token) {
 }
 
 export async function ensureAdminUser() {
+  // A known admin password must never reach a deployed server: production needs ADMIN_PASSWORD.
+  const password = process.env.ADMIN_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin123')
+  if (!password) return null
   const username = 'admin.com'
-  const passwordHash = await hashPassword('admin123')
+  const passwordHash = await hashPassword(password)
   const user = await User.findOneAndUpdate(
     { username },
     { $set: { displayName: 'System Administrator', passwordHash, active: true, fictional: false } },
