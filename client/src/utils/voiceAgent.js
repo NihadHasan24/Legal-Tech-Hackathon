@@ -13,10 +13,11 @@ export function parseAnswer(field, raw) {
   if (!step) return undefined
   if (typeof raw === 'boolean') return step.choices?.some(([option]) => option === raw) ? raw : undefined
   if (typeof raw !== 'string') return undefined
-  const value = step.tel ? asciiDigits(raw.trim()) : raw.trim()
+  // A number keeps only its digits (Bangla digits become ASCII); the question's own pattern decides if it is whole.
+  const value = step.digits ? asciiDigits(raw.trim()).replace(/[\s-]/g, '') : raw.trim()
   if (step.choices) return step.choices.map(([option]) => option).find((option) => toolCode(option) === value.toUpperCase())
   if (value.length < (step.min ?? 2) || value.length > (step.max ?? 20)) return undefined
-  if (step.tel && !/^\+?[0-9][0-9 -]{5,19}$/.test(value)) return undefined
+  if (step.digits && !step.digits.test(value)) return undefined
   return value
 }
 
@@ -28,10 +29,51 @@ export function spokenKey(text) {
   return numberWords[word] ?? (/^[1-9]$/.test(word) ? Number(word) : undefined)
 }
 
-// A spoken safe number is kept as digits only and checked like one typed on the keypad.
-export function spokenDigits(raw) {
-  const value = parseAnswer('contactValue', raw)?.replace(/[^0-9]/g, '')
-  return /^[0-9]{6,20}$/.test(value ?? '') ? value : undefined
+// Whisper writes a spoken number as Bangla digit words, often spelled by ear ("শুন্ন", "পাচ", "শাত", "নই"), and the
+// model will not always turn those into digits. They map to digits here, so a spoken number never depends on the model.
+// Words compare by consonant outline, since Whisper's spelling drifts between runs (শূন্য, শুন্ন, শুনো, সুন্ন are one
+// word): vowel signs, hasanta, chandrabindu, and nukta are dropped; স/ষ/শ, ণ/ন, and each aspirated letter and its plain
+// twin (ঠ/ট, থ/ত, ছ/চ, …; "আঠ" is আট) count as the same letter.
+const outline = (word) => word.normalize('NFD').replace(/[\u0981-\u0983\u09BC\u09BE-\u09CD\u09D7\u200C\u200D]/g, '').replace(/[সষ]/g, 'শ').replace(/ণ/g, 'ন')
+  .replace(/[ঠথধছফখঘঝভ]/g, (letter) => 'টতদচপকগজব'['ঠথধছফখঘঝভ'.indexOf(letter)])
+const DIGIT_WORDS = [
+  ['শূন্য', 'শুন্ন', 'শুনো', 'জিরো', 'zero'], ['এক', 'one'], ['দুই', 'দুয়', 'দু', 'two'], ['তিন', 'three'], ['চার', 'four'],
+  ['পাঁচ', 'পাছ', 'five'], ['ছয়', 'ছা', 'ছই', 'six'], ['সাত', 'seven'], ['আট', 'আত', 'eight'], ['নয়', 'নই', 'nine'],
+]
+const digitOfWord = new Map(DIGIT_WORDS.flatMap((words, digit) => words.map((word) => [outline(word), String(digit)])))
+// Outline twins that are not digits: "নেই" (none) looks like "নই" (nine) once the vowel sign is gone.
+const notDigits = new Set(['নেই'].map((word) => word.normalize('NFD')))
+const repeats = new Map([['ডাবল', 2], ['double', 2], ['ট্রিপল', 3], ['triple', 3]].map(([word, times]) => [outline(word), times]))
+
+// "আমার নম্বর এক, দুই, শুন্ন" → "120", "ডাবল জিরো" → "00". Other words ("আমার নম্বর হলো") are skipped rather than
+// failing the number; the caller then hears the digits read back and confirms them, so nothing is taken unheard.
+export function digitsFromWords(text) {
+  let digits = ''
+  let times = 1
+  for (const token of (text ?? '').toLowerCase().split(/[\s,।.;:!?'"()-]+/).filter(Boolean)) {
+    if (repeats.has(outline(token))) { times = repeats.get(outline(token)); continue }
+    const digit = /^[0-9০-৯]+$/.test(token) ? asciiDigits(token) : notDigits.has(token.normalize('NFD')) ? undefined : digitOfWord.get(outline(token))
+    if (digit !== undefined) digits += digit.repeat(times)
+    times = 1
+  }
+  return digits || undefined
+}
+
+// A yes or no said aloud, matched here like a key press so it never waits on the model. A reply with both ("ঠিক
+// হয়নি", "না না, ঠিক আছে") or neither is left to the model, which sees the whole sentence.
+const YES_WORDS = new Set(['হ্যাঁ', 'হ্যা', 'হাঁ', 'হা', 'হুম', 'হুঁ', 'জি', 'জ্বি', 'জী', 'ঠিক', 'সঠিক', 'আছে', 'হয়েছে', 'জমা', 'ওকে', 'yes', 'ok', 'okay'].map((word) => word.normalize('NFD')))
+const NO_WORDS = new Set(['না', 'নাহ', 'নাই', 'নেই', 'ভুল', 'হয়নি', 'নয়', 'no'].map((word) => word.normalize('NFD')))
+export function spokenYesNo(text) {
+  const tokens = (text ?? '').normalize('NFD').toLowerCase().split(/[\s,।.;:!?'"()-]+/).filter(Boolean)
+  const yes = tokens.some((token) => YES_WORDS.has(token))
+  const no = tokens.some((token) => NO_WORDS.has(token))
+  return yes === no ? undefined : yes
+}
+
+// A spoken number (a phone number or an NID) is kept as digits only and checked like one typed on the keypad.
+export function spokenDigits(raw, field = 'contactValue') {
+  const value = parseAnswer(field, raw)?.replace(/[^0-9]/g, '')
+  return value && steps[field].digits.test(value) ? value : undefined
 }
 
 // Applies an extraction result. Returns the new draft plus the fields that were actually accepted.

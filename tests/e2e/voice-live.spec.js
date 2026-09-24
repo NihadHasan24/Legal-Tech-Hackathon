@@ -13,8 +13,8 @@ test('a spoken answer is transcribed and fills approved fields', async ({ page }
   await page.goto('/voice')
   await page.getByRole('button', { name: 'বাংলা', exact: true }).click()
   await page.getByRole('button', { name: 'কল করুন', exact: true }).click()
-  await expect(page.getByRole('heading', { name: steps.urgent.prompt })).toBeFocused()
-  await page.keyboard.press('2')
+  await expect(page.getByRole('heading', { name: steps.service.prompt })).toBeFocused()
+  await page.keyboard.press('1') // a complaint
   await expect(page.getByRole('heading', { name: steps.callerRole.prompt })).toBeFocused()
   await page.keyboard.press('2') // calling for someone else, so the next question is spoken
   await expect(page.getByRole('heading', { name: steps.callerName.prompt })).toBeFocused()

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
 import { HttpError } from '../utils/httpError.js'
+import { LOOKUP_CODE } from './requests.js'
 
 const fail = (message) => { throw new HttpError(400, 'VALIDATION_ERROR', message) }
 const text = (value, label, min = 1, max = 1000) => {
@@ -72,7 +73,7 @@ export function validatePaymentStatus(request, _response, next) {
 
 export function validateLawyerChangeRequest(request, _response, next) {
   const value = body(request, ['lookupCode', 'callerVerified', 'contactChannel', 'reason'])
-  if (typeof value.lookupCode !== 'string' || !/^[a-f0-9]{24}$/.test(value.lookupCode)) fail('A valid lookup code is required.')
+  if (typeof value.lookupCode !== 'string' || !LOOKUP_CODE.test(value.lookupCode)) fail('A valid lookup code is required.')
   if (value.callerVerified !== true) fail('Human caller-verification attestation is required.')
   if (!['PHONE', 'IN_PERSON'].includes(value.contactChannel)) fail('Safe contact channel is invalid.')
   value.reason = text(value.reason, 'Applicant request', 5, 1000)

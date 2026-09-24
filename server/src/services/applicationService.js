@@ -1,10 +1,10 @@
 import mongoose from 'mongoose'
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { Application, AssistanceRecord, AuditEvent, CallRecording, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerPaymentEvent, LawyerUpdate, Mediation, Person, Referral, Representation, RoleAssignment, SafeContactProfile, Task, User, VoiceTranscript } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
 import { nextRecordId } from '../utils/recordId.js'
-import { extractionModel, speechModel } from './ai/groq.js'
+import { extractionModel, outlineComplaint, speechModel } from './ai/groq.js'
 import { appendAudit, getAuditTrail } from './auditService.js'
 
 const intakeChannels = {
@@ -25,6 +25,12 @@ export function urgencyReasons({ urgentFact, aiSensitive, restrictedEvidence }) 
   ].filter(Boolean)
 }
 
+// What an officer weighs first. Each signal comes from a recorded fact or event; none is a judgement made here.
+function vulnerabilities({ urgent, representative, nidKnown, aiSensitive }) {
+  return [urgent && 'SAFETY_RISK', representative && 'REPRESENTATIVE_CALLER', nidKnown === 'NO' && 'NID_UNKNOWN', aiSensitive && 'AI_FLAGGED_DANGER'].filter(Boolean)
+}
+const latestValues = (facts) => { const values = {}; for (const fact of facts) values[fact.field] ??= fact.value; return values }
+
 function intakeAssignment(actor) {
   const assignment = actor.assignments.find(({ role }) => intakeChannels[role])
   if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This role cannot submit an application.')
@@ -38,10 +44,11 @@ export async function officeApplication(applicationId, actor, session) {
   return application
 }
 
-export async function advance(application, session, changes = {}) {
+// Bumps the record once; `events` reserves that many audit sequence numbers for the change.
+export async function advance(application, session, changes = {}, events = 1) {
   const updated = await Application.findOneAndUpdate(
     { applicationId: application.applicationId, version: application.version },
-    { $set: changes, $inc: { version: 1, auditSequence: 1 } },
+    { $set: changes, $inc: { version: 1, auditSequence: events } },
     { returnDocument: 'after', session },
   )
   if (!updated) throw new HttpError(409, 'CONFLICT', 'The application changed. Refresh and retry.')
@@ -95,23 +102,45 @@ const voiceChannelUser = () => User.findOneAndUpdate(
   { upsert: true, returnDocument: 'after' },
 )
 
-export async function submitVoiceIntake({ mode, callbackReason, answers, correctedFields = [], aiFields = [], confirmation = 'BUTTON', transcript, aiSensitive = false }, actor = null) {
+// 16699 caller's status PIN: six digits, so it can be read out on the call and said back to the helpline.
+// ponytail: 10^6 codes; guessing is bounded by the public rate limit, the 15-minute recording window, and staff-only
+// lookups. Add a per-application attempt lockout before exposing any caller-facing lookup.
+const newVoicePin = () => String(randomInt(0, 1_000_000)).padStart(6, '0')
+
+// Sentences for the officer's first task; each is translated on the Bangla screen.
+function voiceReviewSteps({ representative, answers, aiSensitive }) {
+  return [
+    representative ? 'Reported by a representative: authority and applicant confirmation are pending.' : 'Reported by the applicant by voice.',
+    answers.nid ? 'NID number given by the caller; verify it before relying on it.' : 'Identity is incomplete.',
+    answers.nidKnown === false && 'NID not known: the caller was advised to verify identity at the nearest UDC.',
+    answers.urgent && 'The caller reported a current threat, violence, or safety risk; decide priority first.',
+    'Contact only through the active safe-contact profile with neutral wording. No SMS or voicemail.',
+    aiSensitive && 'AI flagged possible violence or danger in the caller’s words; a human must judge it.',
+  ].filter(Boolean).join(' ')
+}
+
+// One authoritative record either way: a complaint goes to the DLAO queue; an advice request waits for a helpline
+// callback and becomes a complaint only if the officer finds formal legal aid is needed.
+export async function submitVoiceIntake({ mode, answers, correctedFields = [], aiFields = [], confirmation = 'BUTTON', transcript, aiSensitive = false }, actor = null) {
   const channelUser = await voiceChannelUser()
   const applicationId = await nextRecordId('APP')
-  const lookupCode = newLookupCode()
+  const lookupCode = newVoicePin()
+  const advice = mode === 'ADVICE'
+  // Outside the transaction: a slow or failed model call never blocks or loses the submission.
+  const outline = advice ? null : await outlineComplaint(answers.problem).catch(() => null)
   return mongoose.connection.transaction(async (session) => {
-    const callback = mode === 'CALLBACK'
     const representative = answers.callerRole === 'REPRESENTATIVE'
-    const phone = callback || answers.contactChannel === 'PHONE'
-    const smsSafe = !callback && phone && answers.smsSafe
-    const sourceType = callback ? 'UNKNOWN_OR_UNVERIFIED' : representative ? 'REPRESENTATIVE_REPORTED' : 'APPLICANT_REPORTED'
+    const trusted = answers.contactChannel === 'TRUSTED_PERSON'
+    const phone = advice || trusted || answers.contactChannel === 'PHONE'
+    const sourceType = advice ? 'UNKNOWN_OR_UNVERIFIED' : representative ? 'REPRESENTATIVE_REPORTED' : 'APPLICANT_REPORTED'
+    const applicantName = representative ? answers.applicantName : answers.callerName
     const recordedByUserId = channelUser._id
 
     let applicant
     let citizenUserId = null
 
-    // Only a citizen calling for themselves becomes the applicant; staff demos and representatives stay separate people.
-    if (!representative && actor?.assignments?.some(({ role }) => role === 'CITIZEN')) {
+    // Only a citizen complaining for themselves becomes the applicant; staff demos, representatives, and advice stay separate.
+    if (!advice && !representative && actor?.assignments?.some(({ role }) => role === 'CITIZEN')) {
       const authUser = await User.findById(actor.userId).session(session)
       if (authUser) {
         citizenUserId = authUser._id.toString()
@@ -119,7 +148,7 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
           applicant = await Person.findById(authUser.personId).session(session)
         }
         if (!applicant) {
-          const [createdPerson] = await Person.create([{ displayName: answers.applicantName || authUser.displayName || 'Citizen Applicant' }], { session })
+          const [createdPerson] = await Person.create([{ displayName: applicantName || authUser.displayName || 'Citizen Applicant' }], { session })
           applicant = createdPerson
           authUser.personId = createdPerson._id
         }
@@ -127,9 +156,9 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
         if (answers.contactValue && !authUser.phone) {
           authUser.phone = answers.contactValue
         }
-        if (answers.applicantName && (!authUser.displayName || authUser.displayName === authUser.username)) {
-          authUser.displayName = answers.applicantName
-          applicant.displayName = answers.applicantName
+        if (applicantName && (!authUser.displayName || authUser.displayName === authUser.username)) {
+          authUser.displayName = applicantName
+          applicant.displayName = applicantName
           await applicant.save({ session })
         }
         await authUser.save({ session })
@@ -137,7 +166,7 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
     }
 
     if (!applicant) {
-      const [newPerson] = await Person.create([{ displayName: callback ? 'Not collected (callback request)' : answers.applicantName }], { session })
+      const [newPerson] = await Person.create([{ displayName: advice ? 'Not collected (advice request)' : applicantName, identityStatus: answers.nid ? 'PENDING_REVIEW' : 'INCOMPLETE' }], { session })
       applicant = newPerson
     }
 
@@ -147,52 +176,60 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
       scope: 'Initial report through the 16699 voice simulation; authority not verified.', recordedByUserId,
     }], { session }) : []
     // [fact field, answer it came from, value]; an answer the live model extracted is flagged aiInferred.
-    const factValues = callback
-      ? [['location.district', 'district', answers.district], ['safety.urgent', 'urgent', answers.urgent ? 'YES' : 'NO'], ['intake.callback_reason', null, callbackReason]]
-      : [['complaint.summary', 'problem', answers.problem], ['location.district', 'district', answers.district], ['identity.document_access', 'identityDocument', answers.identityDocument], ['safety.urgent', 'urgent', answers.urgent ? 'YES' : 'NO']]
+    const factValues = advice
+      ? [['advice.topic', 'adviceTopic', answers.adviceTopic]]
+      : [['complaint.summary', 'problem', answers.problem], ['location.district', 'district', answers.district],
+        ['identity.nid_known', 'nidKnown', answers.nidKnown ? 'YES' : 'NO'], ...(answers.nid ? [['identity.nid', 'nid', answers.nid]] : []),
+        ['safety.urgent', 'urgent', answers.urgent ? 'YES' : 'NO'], ['contact.preference', 'contactChannel', answers.contactChannel]]
     // Representative reports are never applicant-confirmed here; only the applicant can confirm them later.
-    const applicantConfirmed = !callback && !representative
-    const facts = await CaseFact.create(factValues.map(([field, answerField, value]) => ({
-      applicationId, field, value, sourceType, sourcePersonId: callback ? undefined : caller._id,
+    const applicantConfirmed = !advice && !representative
+    const callerFacts = factValues.map(([field, answerField, value]) => ({
+      applicationId, field, value, sourceType, sourcePersonId: advice ? undefined : caller._id,
       captureMethod: 'VOICE', aiInferred: aiFields.includes(answerField),
       callerConfirmed: true, applicantConfirmed, confirmedByPersonId: applicantConfirmed ? applicant._id : undefined,
       revision: 1, recordedByUserId,
-    })), { session, ordered: true })
+    }))
+    // The model's outline of the account: unverified suggestions, never confirmed by anyone.
+    const outlineFacts = Object.entries(outline ? { 'incident.what': outline.what, 'incident.when': outline.when, 'incident.where': outline.where,
+      'incident.who': outline.who, 'complaint.type': outline.type, 'complaint.legal_need': outline.legalNeed } : {})
+      .filter(([, value]) => value)
+      .map(([field, value]) => ({ applicationId, field, value, sourceType: 'AI_INFERRED', captureMethod: 'AI', aiInferred: true, revision: 1, recordedByUserId }))
+    const facts = await CaseFact.create([...callerFacts, ...outlineFacts], { session, ordered: true })
+    const [trustedPerson] = trusted ? await Person.create([{ displayName: answers.trustedPerson }], { session }) : []
+    // A UDC route means in person at the UDC; a trusted person is reached on their own phone. Never SMS or voicemail.
     const [profile] = await SafeContactProfile.create([{
       applicationId, version: 1,
-      allowedChannels: phone ? ['PHONE', ...(smsSafe ? ['SMS'] : [])] : ['IN_PERSON'],
-      prohibitedChannels: phone ? (smsSafe ? [] : ['SMS']) : ['PHONE', 'SMS'],
-      contactValue: phone ? answers.contactValue : undefined,
-      contactOwnerPersonId: phone && !callback ? (answers.contactOwner === 'CALLER' ? caller._id : applicant._id) : undefined,
-      safeTimeWindow: answers.safeTime, smsSafe, neutralWordingRequired: true, unknownAnswerAction: 'DISCLOSE_NOTHING', recordedByUserId,
+      allowedChannels: phone ? ['PHONE'] : ['IN_PERSON'],
+      prohibitedChannels: phone ? ['SMS'] : ['PHONE', 'SMS'],
+      contactValue: phone ? (trusted ? answers.trustedPhone : answers.contactValue) : undefined,
+      contactOwnerPersonId: trusted ? trustedPerson._id : phone && !advice ? caller._id : undefined,
+      safeTimeWindow: answers.safeTime, smsSafe: false, neutralWordingRequired: true, unknownAnswerAction: 'DISCLOSE_NOTHING', recordedByUserId,
     }], { session })
-    const [task] = await Task.create([{
-      applicationId, kind: 'INTAKE_REVIEW', ownerRole: 'DLAO_OFFICER',
-      title: callback ? `${answers.urgent ? 'Urgent human' : 'Human'} callback requested` : 'Review 16699 voice intake',
-      nextAction: callback
-        ? 'Call back only on the recorded safe number at the safe time. Use neutral wording; disclose nothing if someone else answers.'
-        : `${representative ? 'Reported by a representative: authority and applicant confirmation are pending.' : 'Reported by the applicant by voice.'} Identity is incomplete. Contact only through the active safe-contact profile with neutral wording.${aiSensitive ? ' AI flagged possible violence or danger in the caller’s words; a human must judge it.' : ''}`,
-    }], { session })
-    const aiAssisted = aiFields.length > 0 || Boolean(transcript)
+    const [task] = await Task.create([advice
+      ? { applicationId, kind: 'ADVICE_CALLBACK', ownerRole: 'HELPLINE_AGENT', title: 'Call back with legal information',
+        nextAction: 'Call back only on the recorded safe number at the safe time. Give legal information; if formal legal aid is needed, record the applicant details for DLAO review.' }
+      : { applicationId, kind: 'INTAKE_REVIEW', ownerRole: 'DLAO_OFFICER', title: 'Review 16699 voice intake', nextAction: voiceReviewSteps({ representative, answers, aiSensitive }) },
+    ], { session })
+    const aiAssisted = aiFields.length > 0 || Boolean(transcript) || outlineFacts.length > 0
     const [storedTranscript] = transcript ? await VoiceTranscript.create([{ applicationId, turns: transcript, transcribedBy: speechModel() }], { session }) : []
     const events = [
       {
         action: 'APPLICATION_SUBMITTED',
-        // Records that AI assisted and which answers it extracted; no model reasoning is stored.
-        newState: { status: 'SUBMITTED', applicantPersonId: applicant.id, mode, callerRole: answers.callerRole ?? 'NOT_COLLECTED', callbackReason: callbackReason ?? null, correctedFields, aiAssisted, aiSensitive, aiModels: aiAssisted ? { speechToText: speechModel(), extraction: extractionModel() } : null, aiFields, confirmation },
+        // Records that AI assisted and which answers it extracted; no model reasoning, and never the NID itself.
+        newState: { status: 'SUBMITTED', applicantPersonId: applicant.id, mode, service: advice ? 'ADVICE' : 'COMPLAINT', callerRole: answers.callerRole ?? 'NOT_COLLECTED', nidProvided: Boolean(answers.nid), contactRoute: advice ? 'PHONE' : answers.contactChannel, correctedFields, aiAssisted, aiSensitive, aiModels: aiAssisted ? { speechToText: speechModel(), extraction: extractionModel() } : null, aiFields, confirmation },
         reason: 'Caller confirmed the read-back and submitted through the 16699 voice simulation.',
       },
       ...(representation ? [{ action: 'REPRESENTATION_RECORDED', newState: { representationId: representation.id, authorityStatus: 'PENDING' } }] : []),
       // Project decision 2026-09-23: every call is recorded; the greeting tells the caller, and no opt-out is offered.
       { action: 'RECORDING_NOTICE_GIVEN', newState: { notice: 'GREETING_ANNOUNCES_CALL_RECORDING', optOutOffered: false } },
-      ...facts.map((fact) => ({ action: 'FACT_RECORDED', newState: { factId: fact.id, field: fact.field, sourceType, callerConfirmed: true, applicantConfirmed } })),
+      ...facts.map((fact) => ({ action: 'FACT_RECORDED', newState: { factId: fact.id, field: fact.field, sourceType: fact.sourceType, callerConfirmed: fact.callerConfirmed, applicantConfirmed: fact.applicantConfirmed } })),
       { action: 'SAFE_CONTACT_UPDATED', newState: { profileId: profile.id, version: 1 } },
       { action: 'TASK_CREATED', newState: { taskId: task.id, kind: task.kind, ownerRole: task.ownerRole } },
       ...(storedTranscript ? [{ action: 'TRANSCRIPT_STORED', newState: { transcriptId: storedTranscript.id, turns: transcript.length } }] : []),
     ]
 
     await Application.create([{
-      applicationId, applicantPersonId: applicant._id, officeCode: VOICE_OFFICE, channel: 'VOICE_SIM',
+      applicationId, applicantPersonId: applicant._id, officeCode: VOICE_OFFICE, channel: 'VOICE_SIM', service: advice ? 'ADVICE' : 'COMPLAINT',
       submittedByUserId: channelUser._id, auditSequence: events.length, lookupCodeHash: lookupHash(lookupCode),
       citizenUserId,
     }], { session })
@@ -206,6 +243,39 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
       lookupCode,
       authenticated: Boolean(citizenUserId),
     }
+  })
+}
+
+// The helpline officer's callback on a 16699 advice request: legal information given (the request closes), or formal
+// legal aid needed, which turns the same record into a complaint for DLAO review. What the officer enters is staff-entered.
+export async function recordAdviceOutcome(applicationId, { outcome, guidance, applicantName, district, nid }, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const application = await Application.findOne({ applicationId }).session(session)
+    // A request that became a complaint keeps its outcome, so a second outcome is a conflict, not a missing record.
+    if (!application || (application.service !== 'ADVICE' && !application.adviceOutcome)) throw new HttpError(404, 'NOT_FOUND', 'Advice request not found.')
+    if (!hasOfficeRole(actor, 'HELPLINE_AGENT', application.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot handle this advice request.')
+    if (application.adviceOutcome) throw new HttpError(409, 'ALREADY_RECORDED', 'This advice request already has an outcome.')
+    const formal = outcome === 'FORMAL_ASSISTANCE'
+    const staffFact = (field, value) => ({ applicationId, field, value, sourceType: 'STAFF_ENTERED', captureMethod: 'STAFF', revision: 1, recordedByUserId: actor.userId })
+    const facts = await CaseFact.create([staffFact('advice.guidance', guidance), ...(formal ? [staffFact('location.district', district),
+      staffFact('identity.nid_known', nid ? 'YES' : 'NO'), ...(nid ? [staffFact('identity.nid', nid)] : [])] : [])], { session, ordered: true })
+    if (formal) await Person.updateOne({ _id: application.applicantPersonId }, { $set: { displayName: applicantName, identityStatus: nid ? 'PENDING_REVIEW' : 'INCOMPLETE' } }, { session })
+    const callback = await Task.findOneAndUpdate({ applicationId, kind: 'ADVICE_CALLBACK', status: 'OPEN' },
+      { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } }, { returnDocument: 'after', session })
+    const [review] = formal ? await Task.create([{ applicationId, kind: 'INTAKE_REVIEW', ownerRole: 'DLAO_OFFICER', title: 'Review new application',
+      nextAction: 'Review intake, identity gaps, provenance, and safe contact before deciding.' }], { session }) : []
+    const events = [
+      ...facts.map((fact) => ({ action: 'FACT_RECORDED', newState: { factId: fact.id, field: fact.field, sourceType: fact.sourceType } })),
+      { action: 'ADVICE_OUTCOME_RECORDED', newState: { outcome, callbackTaskId: callback?.id ?? null },
+        reason: formal ? 'Helpline officer found that formal legal aid is needed; the request now waits for DLAO review.' : 'Helpline officer gave legal information on the callback; no application follows.' },
+      ...(review ? [{ action: 'TASK_CREATED', newState: { taskId: review.id, kind: review.kind, ownerRole: review.ownerRole } }] : []),
+    ]
+    const updated = await advance(application, session, { adviceOutcome: outcome, ...(formal ? { service: 'COMPLAINT' } : {}) }, events.length)
+    const first = updated.auditSequence - events.length + 1
+    for (const [index, event] of events.entries()) {
+      await appendAudit({ ...event, applicationId, sequence: first + index, actorUserId: actor.userId, actorRole: 'HELPLINE_AGENT', channel: 'HELPLINE_SIM' }, session)
+    }
+    return { applicationId, outcome, service: updated.service }
   })
 }
 
@@ -498,7 +568,7 @@ export async function getApplication(applicationId, actor) {
   if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode) && !mediationAccess) {
     throw new HttpError(403, 'FORBIDDEN', 'This role cannot read the application.')
   }
-  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence] = await Promise.all([
+  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence, summaryFacts] = await Promise.all([
     Person.findById(application.applicantPersonId).select('displayName identityStatus').lean(),
     Task.findOne({ applicationId, status: 'OPEN' }).sort({ createdAt: 1 }).select('title ownerRole nextAction dueAt').lean(),
     Representation.findOne({ applicationId }).sort({ createdAt: -1 }).populate('representativePersonId', 'displayName').lean(),
@@ -507,13 +577,19 @@ export async function getApplication(applicationId, actor) {
     CaseFact.findOne({ applicationId, field: 'safety.urgent' }).sort({ revision: -1 }).select('value revision sourceType').lean(),
     AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive').lean(),
     Document.countDocuments({ applicationId, sensitivity: 'RESTRICTED' }),
+    CaseFact.find({ applicationId, field: { $in: ['complaint.type', 'complaint.legal_need', 'identity.nid_known'] } }).sort({ revision: -1 }).select('field value').lean(),
   ])
+  const summary = latestValues(summaryFacts)
   return {
     applicationId, caseId: application.caseId ?? null, status: application.status,
     reviewState: application.reviewState, priorityDecision: application.priorityDecision ?? null, version: application.version, channel: application.channel,
     officeCode: application.officeCode, applicantName: person?.displayName ?? 'Unavailable',
     identityStatus: person?.identityStatus ?? 'INCOMPLETE', nextTask,
     urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, restrictedEvidence }),
+    service: application.service ?? 'COMPLAINT',
+    // AI suggestions from the caller's own account; the officer confirms or ignores them.
+    complaintType: summary['complaint.type'] ?? null, legalNeed: summary['complaint.legal_need'] ?? null,
+    vulnerability: vulnerabilities({ urgent: urgentFact?.value === 'YES', representative: Boolean(representation), nidKnown: summary['identity.nid_known'], aiSensitive: submitted?.newState?.aiSensitive }),
     representation: representation ? {
       representativeName: representation.representativePersonId?.displayName ?? 'Unavailable',
       relationship: representation.relationship, authorityStatus: representation.authorityStatus,
@@ -541,10 +617,10 @@ export async function listWorkspace(role, actor) {
   const assignment = actor.assignments.find((item) => item.role === role)
   if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This role is not assigned to this user.')
   if (role === 'DLAO_OFFICER' || role === 'CASE_SUPPORT') {
-    const applications = await Application.find({ officeCode: assignment.officeCode })
+    const applications = await Application.find({ officeCode: assignment.officeCode, service: { $ne: 'ADVICE' } })
       .sort({ updatedAt: -1 }).select('applicationId caseId status reviewState priorityDecision channel applicantPersonId createdAt updatedAt').lean()
     const ids = applications.map(({ applicationId }) => applicationId)
-    const [people, tasks, urgentFacts, aiEvents, restricted, referrals, lawyerUpdates] = await Promise.all([
+    const [people, tasks, urgentFacts, aiEvents, restricted, referrals, lawyerUpdates, summaryFacts, representations] = await Promise.all([
       Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName identityStatus').lean(),
       Task.find({ applicationId: { $in: ids }, status: 'OPEN' }).select('applicationId kind dueAt createdAt nextAction').lean(),
       CaseFact.find({ applicationId: { $in: ids }, field: 'safety.urgent' }).sort({ revision: -1 }).select('applicationId value revision sourceType').lean(),
@@ -552,6 +628,8 @@ export async function listWorkspace(role, actor) {
       Document.find({ applicationId: { $in: ids }, sensitivity: 'RESTRICTED' }).select('applicationId').lean(),
       Referral.find({ applicationId: { $in: ids }, status: { $in: ['SENT', 'ACKNOWLEDGED'] } }).select('applicationId status dueAt receivingOfficeCode').lean(),
       LawyerUpdate.find({ applicationId: { $in: ids }, $or: [{ status: 'MISSED' }, { status: 'PENDING', dueAt: { $lte: new Date() } }] }).select('applicationId sequence status dueAt').lean(),
+      CaseFact.find({ applicationId: { $in: ids }, field: { $in: ['complaint.type', 'identity.nid_known'] } }).sort({ revision: -1 }).select('applicationId field value').lean(),
+      Representation.find({ applicationId: { $in: ids } }).select('applicationId').lean(),
     ])
     const names = new Map(people.map((person) => [person._id.toString(), person.displayName]))
     const identities = new Map(people.map((person) => [person._id.toString(), person.identityStatus]))
@@ -562,6 +640,8 @@ export async function listWorkspace(role, actor) {
     const restrictedCounts = Map.groupBy(restricted, (item) => item.applicationId)
     const waiting = new Map(referrals.map((referral) => [referral.applicationId, referral]))
     const missedUpdates = Map.groupBy(lawyerUpdates, (item) => item.applicationId)
+    const summaries = new Map([...Map.groupBy(summaryFacts, (fact) => fact.applicationId)].map(([id, facts]) => [id, latestValues(facts)]))
+    const represented = new Set(representations.map((item) => item.applicationId))
     const now = Date.now()
     // ponytail: full-office scan suits fictional demo data; add indexed pagination when real volume warrants it.
     const records = applications.map((item) => ({
@@ -569,12 +649,31 @@ export async function listWorkspace(role, actor) {
       reviewState: item.reviewState, priorityDecision: item.priorityDecision ?? null, channel: item.channel,
       applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
       createdAt: item.createdAt, updatedAt: item.updatedAt,
+      complaintType: summaries.get(item.applicationId)?.['complaint.type'] ?? null,
+      vulnerability: vulnerabilities({ urgent: Boolean(urgency.get(item.applicationId)), representative: represented.has(item.applicationId),
+        nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId) }),
       flags: queueFlags(item, identities.get(item.applicantPersonId.toString()), tasksByApplication.get(item.applicationId) ?? [],
         urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0 }),
         waiting.get(item.applicationId), missedUpdates.get(item.applicationId) ?? [], now),
     }))
     const counts = Object.fromEntries(['NEW', 'INCOMPLETE', 'URGENT_RECOMMENDATION', 'PENDING', 'OVERDUE', 'REFERRAL_WAITING', 'LAWYER_UPDATE_OVERDUE'].map((flag) => [flag, records.filter((record) => record.flags.some((item) => item.code === flag)).length]))
     return { role, officeCode: assignment.officeCode, records, report: { total: records.length, accepted: records.filter((item) => item.status === 'ACCEPTED').length, byChannel: Object.fromEntries([...new Set(records.map((item) => item.channel))].map((channel) => [channel, records.filter((item) => item.channel === channel).length])), counts }, unavailableQueues: [] }
+  }
+  if (role === 'HELPLINE_AGENT') {
+    // ponytail: oldest 50 open advice requests only; add paging when callback volume warrants it.
+    const requests = await Application.find({ officeCode: assignment.officeCode, service: 'ADVICE', adviceOutcome: null })
+      .sort({ createdAt: 1 }).limit(50).select('applicationId createdAt').lean()
+    const ids = requests.map(({ applicationId }) => applicationId)
+    const [topics, profiles] = await Promise.all([
+      CaseFact.find({ applicationId: { $in: ids }, field: 'advice.topic' }).select('applicationId value').lean(),
+      SafeContactProfile.find({ applicationId: { $in: ids } }).sort({ version: 1 }).select('applicationId contactValue safeTimeWindow').lean(),
+    ])
+    const topic = new Map(topics.map((fact) => [fact.applicationId, fact.value]))
+    const contact = new Map(profiles.map((profile) => [profile.applicationId, profile])) // ascending, so the latest version wins
+    return { role, officeCode: assignment.officeCode, records: requests.map(({ applicationId, createdAt }) => ({
+      applicationId, createdAt, topic: topic.get(applicationId) ?? '', contactValue: contact.get(applicationId)?.contactValue ?? null,
+      safeTime: contact.get(applicationId)?.safeTimeWindow ?? null,
+    })) }
   }
   if (role === 'MEDIATOR' || role === 'CLAO') {
     const filter = { officeCode: assignment.officeCode, stage: role === 'CLAO' ? 'PENDING_CLAO_CERTIFICATION' : { $ne: 'CERTIFIED_FINAL' } }

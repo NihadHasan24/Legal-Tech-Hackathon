@@ -13,6 +13,10 @@ import PhaseTracker from '../components/PhaseTracker.jsx'
 
 const none = () => bi('None', 'নেই')
 const yesNo = (value) => value ? bi('Yes', 'হ্যাঁ') : bi('No', 'না')
+// How far a fact can be relied on: still to be checked (AI output, unverified callers, an NID), confirmed by the victim,
+// or reported by a representative and not yet confirmed. Staff and document entries carry their own source instead.
+const factStatus = (fact) => ['AI_INFERRED', 'UNKNOWN_OR_UNVERIFIED'].includes(fact.sourceType) || fact.field === 'identity.nid' ? 'VERIFICATION_REQUIRED'
+  : fact.applicantConfirmed ? 'VICTIM_CONFIRMED' : fact.sourceType === 'REPRESENTATIVE_REPORTED' ? 'REPRESENTATIVE_REPORTED' : null
 
 // Officer-only playback of the full 16699 call. Fetched with the session token, which a bare <audio src> cannot send.
 function CallRecording({ applicationId, token }) {
@@ -185,6 +189,9 @@ export default function RecordPage({ session }) {
               <div><dt><Bi en="Case ID" bn="মামলা নম্বর" /></dt><dd>{record.caseId || bi('After acceptance', 'গ্রহণের পরে')}</dd></div>
               <div><dt><Bi en="Identity" bn="পরিচয়" /></dt><dd><Term code={record.identityStatus} /></dd></div>
               {record.representation && <div className="wide"><dt><Bi en="Reported by" bn="জানিয়েছেন" /></dt><dd>{record.representation.representativeName} · {record.representation.relationship} · <Bi en="authority" bn="অনুমতি" /> <Term code={record.representation.authorityStatus} /></dd></div>}
+              {record.vulnerability?.length > 0 && <div className="wide"><dt><Bi en="Weigh first" bn="আগে বিবেচনা করুন" /></dt><dd>{record.vulnerability.map(say).join(' · ')}</dd></div>}
+              {record.complaintType && <div><dt><Bi en="Complaint type (AI suggestion)" bn="অভিযোগের ধরন (এআইয়ের পরামর্শ)" /></dt><dd><Term code={record.complaintType} /></dd></div>}
+              {record.legalNeed && <div className="wide"><dt><Bi en="Legal need (AI suggestion)" bn="আইনি প্রয়োজন (এআইয়ের পরামর্শ)" /></dt><dd lang="bn">{record.legalNeed}</dd></div>}
             </dl>
           </section>
           {officer && <section className="card safety-card" aria-labelledby="safe-title">
@@ -314,12 +321,13 @@ export default function RecordPage({ session }) {
           {officer && <Panel id="facts-title" en="Facts and sources" bn="তথ্য ও উৎস" hint={data.facts.length ? bi(`${data.facts.length} facts`, `${num(data.facts.length)}টি তথ্য`) : none()}>
             {data.facts.length === 0 ? <p>{none()}</p> : <div className="table-wrap"><table>
               <caption className="visually-hidden">{bi('Recorded facts and where each came from', 'নথিভুক্ত তথ্য এবং তথ্যের উৎস')}</caption>
-              <thead><tr><th scope="col"><Bi en="Fact" bn="তথ্য" /></th><th scope="col"><Bi en="Value" bn="মান" /></th><th scope="col"><Bi en="Source" bn="উৎস" /></th><th scope="col"><Bi en="Confirmed by" bn="নিশ্চিত করেছেন" /></th></tr></thead>
+              <thead><tr><th scope="col"><Bi en="Fact" bn="তথ্য" /></th><th scope="col"><Bi en="Value" bn="মান" /></th><th scope="col"><Bi en="Source" bn="উৎস" /></th><th scope="col"><Bi en="Confirmed by" bn="নিশ্চিত করেছেন" /></th><th scope="col"><Bi en="Status" bn="অবস্থা" /></th></tr></thead>
               <tbody>{data.facts.map((fact) => <tr key={fact._id}>
                 <th scope="row"><Term code={fact.field} /></th>
                 <td>{tr(say(fact.value))}</td>
                 <td><Term code={fact.sourceType} /><small className="muted"> · <Term code={fact.captureMethod} /> · {bi('r', 'সং')}{num(fact.revision)}{fact.aiInferred ? ` · ${bi('AI', 'এআই')}` : ''}</small></td>
                 <td><Bi en="Caller" bn="কলার" /> {yesNo(fact.callerConfirmed)}<br /><Bi en="Applicant" bn="আবেদনকারী" /> {yesNo(fact.applicantConfirmed)}</td>
+                <td>{factStatus(fact) && <Badge code={factStatus(fact)} />}</td>
               </tr>)}</tbody>
             </table></div>}
           </Panel>}

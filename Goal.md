@@ -934,6 +934,8 @@ STOP.
 
 > Changed by user decision (2026-09-23; see `Project.md` Section 7.5): every call is recorded after a spoken greeting notice, with no consent questions (items 13, and the refusal test) and no caller-initiated human-callback button. Immediate danger still switches to the minimal-data human callback (item 12). The disclosure (item 2) is kept as a short on-screen badge.
 
+> Changed again by user decision (2026-09-24; see `Project.md` Section 7.5): the call now opens with complaint vs information/advice, collects an optional NID, and a reported danger continues the full intake with an urgent safety alert and 999 advice instead of switching to the minimal-data callback (item 12 now applies only to the advice path, which is a helpline callback).
+
 ### Objective
 Build the entire safe intake workflow before connecting a live GPT voice model.
 

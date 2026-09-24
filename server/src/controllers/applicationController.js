@@ -1,8 +1,12 @@
 import { extractAnswers, transcribeAnswer } from '../services/ai/groq.js'
-import { acceptApplication, addFact, addRepresentation, completeTask, correctFact, createTask, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, recordConsent, recordContactAttempt, reviewApplication, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
+import { acceptApplication, addFact, recordAdviceOutcome, addRepresentation, completeTask, correctFact, createTask, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, recordConsent, recordContactAttempt, reviewApplication, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
 
 export async function submit(request, response) {
   response.status(201).json(await submitApplication(request.body, request.auth))
+}
+
+export async function adviceOutcome(request, response) {
+  response.json(await recordAdviceOutcome(request.params.applicationId, request.body, request.auth))
 }
 
 export async function submitVoice(request, response) {

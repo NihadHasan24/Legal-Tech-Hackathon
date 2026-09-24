@@ -99,13 +99,20 @@ try {
     const submitted = await submitVoiceIntake({
       mode: 'INTAKE',
       answers: {
-        urgent: false, callerRole: 'REPRESENTATIVE', callerName: 'Fictional Ripon (demo)', relationship: 'Brother',
-        applicantName: 'Fictional Moyuri (demo)', identityDocument: 'UNAVAILABLE',
-        problem: 'Fictional representative report; applicant confirmation remains pending.', district: 'Joypurhat',
-        contactChannel: 'IN_PERSON', safeTime: 'Weekday morning at the office', smsSafe: false,
+        callerRole: 'REPRESENTATIVE', callerName: 'Fictional Ripon (demo)', relationship: 'Brother',
+        applicantName: 'Fictional Moyuri (demo)', district: 'Joypurhat', nidKnown: false,
+        problem: 'Fictional representative report; applicant confirmation remains pending.', urgent: false,
+        contactChannel: 'UDC', safeTime: 'Weekday morning at the office',
       },
     })
     await Application.updateOne({ applicationId: submitted.applicationId }, { $set: { demoSeedKey: 'STEP4_MOYURI_RIPON' } })
+  }
+  if (!await Application.exists({ demoSeedKey: 'VOICE_ADVICE_REQUEST' })) {
+    const submitted = await submitVoiceIntake({
+      mode: 'ADVICE',
+      answers: { adviceTopic: 'Fictional question: how can a worker claim unpaid wages?', contactValue: '01700000000', safeTime: 'Weekday afternoon' },
+    })
+    await Application.updateOne({ applicationId: submitted.applicationId }, { $set: { demoSeedKey: 'VOICE_ADVICE_REQUEST' } })
   }
   if (!await Application.exists({ demoSeedKey: 'STEP7_NUCHING' })) {
     const udc = await User.findOne({ username: 'demo.udc' })

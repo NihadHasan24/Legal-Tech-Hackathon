@@ -42,6 +42,9 @@ const applicationSchema = new Schema({
   citizenUserId: ref('User', false),
   officeCode: { type: String, required: true },
   channel: { type: String, required: true, enum: ['WEB', 'HELPLINE_SIM', 'VOICE_SIM', 'UDC', 'DLAO'] },
+  // A 16699 advice request waits for a helpline callback, outside the DLAO queue, until it becomes a complaint.
+  service: { type: String, enum: ['COMPLAINT', 'ADVICE'], default: 'COMPLAINT' },
+  adviceOutcome: { type: String, enum: ['INFORMATION_PROVIDED', 'FORMAL_ASSISTANCE'] },
   status: { type: String, enum: ['SUBMITTED', 'ACCEPTED'], default: 'SUBMITTED' },
   reviewState: { type: String, enum: ['PENDING_REVIEW', 'NEEDS_INFORMATION', 'READY_FOR_DECISION'], default: 'PENDING_REVIEW' },
   priorityDecision: { type: String, enum: ['URGENT', 'ROUTINE'] },
@@ -184,7 +187,7 @@ export const SafeContactProfile = model('SafeContactProfile', safeContactSchema)
 export const Task = model('Task', new Schema({
   applicationId: recordId,
   caseId: String,
-  kind: { type: String, required: true, enum: ['INTAKE_REVIEW', 'DECISION', 'FOLLOW_UP', 'MANUAL', 'REFERRAL', 'ROUTING_DECISION', 'LAWYER_UPDATE', 'LAWYER_PATTERN_REVIEW', 'LAWYER_CHANGE_REVIEW'] },
+  kind: { type: String, required: true, enum: ['INTAKE_REVIEW', 'DECISION', 'FOLLOW_UP', 'MANUAL', 'REFERRAL', 'ROUTING_DECISION', 'LAWYER_UPDATE', 'LAWYER_PATTERN_REVIEW', 'LAWYER_CHANGE_REVIEW', 'ADVICE_CALLBACK'] },
   title: { type: String, required: true },
   status: { type: String, enum: ['OPEN', 'DONE'], default: 'OPEN' },
   ownerRole: { type: String, required: true, enum: roles },

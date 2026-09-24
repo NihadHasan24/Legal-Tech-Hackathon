@@ -24,19 +24,20 @@ test.use({ launchOptions: { args: ['--use-fake-ui-for-media-stream', '--use-fake
 
 // What the (stubbed) voice service "heard" for each question. Choices use words or a bare key number.
 const heard = {
-  urgent: { text: 'না', values: { urgent: false } },
+  service: { text: 'অভিযোগ', values: { service: 'COMPLAINT' } },
   callerRole: { text: 'দুই', values: {} }, // a bare number: matched to key 2 by the page, not the model
   callerName: { text: 'রিপন', values: { callerName: 'Ripon (fictional)' } },
   relationship: { text: 'ভাই', values: { relationship: 'Brother' } },
   applicantName: { text: 'ময়ূরী', values: { applicantName: 'Moyuri (fictional)' } },
-  identityDocument: { text: 'তিন', values: {} },
-  problem: { text: 'পারিবারিক বিরোধ', values: { problem: 'Fictional family dispute report.' } },
   district: { text: 'জয়পুরহাট', values: { district: 'Joypurhat' } },
+  nidKnown: { text: 'হ্যাঁ', values: { nidKnown: true } },
+  // Whisper's real transcript of a spoken NID, spelled by ear; the model returned nothing for it, as it really did.
+  nid: { text: 'এক, দুই, তিন, চার, পাচ, শুন্ন, নই, আট, শাত, ছা', values: {} },
+  problem: { text: 'পারিবারিক বিরোধ', values: { problem: 'Fictional family dispute report.' } },
+  urgent: { text: 'না', values: { urgent: false } },
   contactChannel: { text: 'ফোনে', values: { contactChannel: 'PHONE' } },
-  contactValue: { text: 'শূন্য এক সাত…', values: { contactValue: '০১৭০০০০০০০০' } },
-  contactOwner: { text: 'আমার নম্বর', values: { contactOwner: 'CALLER' } },
+  contactValue: { text: 'শূন্য, এক, সাত, শূন্য, শূন্য, শূন্য, শূন্য, শূন্য, শূন্য, শূন্য, শূন্য', values: { contactValue: '01700000000' } },
   safeTime: { text: 'সন্ধ্যায়', values: { safeTime: 'Evening' } },
-  smsSafe: { text: 'না', values: { smsSafe: false } },
   confirm: { text: 'হ্যাঁ', values: { confirm: true } },
 }
 
@@ -45,11 +46,11 @@ test('when voice understanding is unavailable, the caller keeps answering by key
   await page.goto('/voice')
   await page.getByRole('button', { name: 'বাংলা', exact: true }).click()
   await page.getByRole('button', { name: 'কল করুন', exact: true }).click()
-  await expect(page.getByRole('heading', { name: steps.urgent.prompt })).toBeFocused()
-  await page.keyboard.press('2') // no one is in danger; a key answers a choice straight away
+  await expect(page.getByRole('heading', { name: steps.service.prompt })).toBeFocused()
+  await page.keyboard.press('1') // a complaint; a key answers a choice straight away
   await expect(page.getByRole('heading', { name: steps.callerRole.prompt })).toBeFocused()
-  await page.keyboard.press('1') // calling for myself
-  await expect(page.getByRole('heading', { name: steps.applicantName.prompt })).toBeFocused()
+  await page.keyboard.press('1') // for myself
+  await expect(page.getByRole('heading', { name: steps.callerName.prompt })).toBeFocused()
 
   await page.keyboard.press('#') // skip the question clip; the beep starts the recording
   await expect(page.getByText(/শুনছি/)).toBeVisible()
@@ -60,50 +61,56 @@ test('when voice understanding is unavailable, the caller keeps answering by key
   await expect(page.getByText(/এখন আপনার বলা উত্তরটি বোঝা যাচ্ছে না/)).toBeVisible()
 
   // The draft survives and the same question continues as a typed answer.
-  const name = page.getByRole('textbox', { name: steps.applicantName.prompt })
+  const name = page.getByRole('textbox', { name: steps.callerName.prompt })
   await expect(name).toBeFocused()
   await name.fill('Fictional Moyuri')
   await page.getByRole('button', { name: 'উত্তর দিন', exact: true }).click()
-  await expect(page.getByRole('heading', { name: steps.identityDocument.prompt })).toBeFocused()
-  await page.keyboard.press('3')
   // Once voice is known to be off, spoken questions open straight into the typed answer.
-  await expect(page.getByRole('textbox', { name: steps.problem.prompt })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: steps.district.prompt })).toBeVisible()
   await expect(page.getByRole('button', { name: 'লিখে উত্তর দিন' })).toHaveCount(0)
 })
 
-test('the whole call can be answered by voice, with the number read back and the submit said aloud', async ({ page }) => {
+test('the whole call can be answered by voice, with each number read back and the submit said aloud', async ({ page }) => {
   test.setTimeout(300000)
   const asked = []
   await page.route('**/audio/{digit*,numberConfirm}.mp3', (route) => route.fulfill({ status: 200, contentType: 'audio/mpeg', body: '' }))
+  // The first yes/no to a read-back is unclear, then "হ্যাঁ ঠিক হয়েছে" arrives with nothing from the model: the page's own
+  // yes/no words must carry it, and the unclear reply must ask the yes/no again, not the number.
+  const confirms = [{ text: 'আঁ', values: {} }, { text: 'হ্যাঁ ঠিক হয়েছে', values: {} }]
   await page.route('**/api/voice/answers**', (route) => {
     const field = new URL(route.request().url()).searchParams.get('fields')
     asked.push(field)
-    return route.fulfill({ json: { ...heard[field], sensitive: false } })
+    return route.fulfill({ json: { ...(field === 'confirm' && confirms.length ? confirms.shift() : heard[field]), sensitive: false } })
   })
   await page.goto('/voice')
   await page.getByRole('button', { name: 'বাংলা', exact: true }).click()
   await page.getByRole('button', { name: 'কল করুন', exact: true }).click()
 
-  const order = ['urgent', 'callerRole', 'callerName', 'relationship', 'applicantName', 'identityDocument', 'problem', 'district', 'contactChannel', 'contactValue']
-  for (const field of order) {
-    await expect(page.getByRole('heading', { name: steps[field].prompt, exact: true })).toBeFocused({ timeout: 20000 })
-    await page.keyboard.press('#') // skip the clip to the beep; the pause then ends the answer
+  const answer = async (fields) => {
+    for (const field of fields) {
+      await expect(page.getByRole('heading', { name: steps[field].prompt, exact: true })).toBeFocused({ timeout: 30000 })
+      await page.keyboard.press('#') // skip the clip to the beep; the pause then ends the answer
+    }
   }
-  // The spoken number is read back (clips stubbed) and confirmed by voice, with no key.
-  await expect(page.getByRole('heading', { name: 'আপনার বলা নম্বর: ০১৭০০০০০০০০' })).toBeFocused({ timeout: 20000 })
-  for (const field of ['contactOwner', 'safeTime', 'smsSafe']) {
-    await expect(page.getByRole('heading', { name: steps[field].prompt, exact: true })).toBeFocused({ timeout: 30000 })
-    await page.keyboard.press('#')
-  }
-  const readback = page.getByRole('heading', { name: 'আপনার উত্তরগুলো শুনে বা পড়ে মিলিয়ে নিন' })
-  await expect(readback).toBeFocused({ timeout: 30000 })
+  // A spoken number is read back (clips stubbed) and confirmed by voice, with no key.
+  const readBack = (digits) => expect(page.getByRole('heading', { name: `আপনার বলা নম্বর: ${digits}` })).toBeFocused({ timeout: 30000 })
+  await answer(['service', 'callerRole', 'callerName', 'relationship', 'applicantName', 'district', 'nidKnown', 'nid'])
+  await readBack('১২৩৪৫০৯৮৭৬')
+  await expect.poll(() => asked.filter((field) => field === 'confirm').length, { timeout: 30000 }).toBe(1)
+  await readBack('১২৩৪৫০৯৮৭৬') // asked again with the number kept, not back to the NID question
+  await answer(['problem', 'urgent', 'contactChannel', 'contactValue'])
+  await readBack('০১৭০০০০০০০০')
+  await answer(['safeTime'])
+  await expect(page.getByRole('heading', { name: 'আপনার উত্তরগুলো শুনে বা পড়ে মিলিয়ে নিন' })).toBeFocused({ timeout: 30000 })
   const submitted = page.waitForRequest('**/api/voice/intakes', { timeout: 30000 })
   await page.keyboard.press('#')
   const body = (await submitted).postDataJSON()
-  expect(asked).toEqual([...order, 'confirm', 'contactOwner', 'safeTime', 'smsSafe', 'confirm'])
+  expect(asked).toEqual(['service', 'callerRole', 'callerName', 'relationship', 'applicantName', 'district', 'nidKnown', 'nid', 'confirm', 'confirm',
+    'problem', 'urgent', 'contactChannel', 'contactValue', 'confirm', 'safeTime', 'confirm'])
+  expect(body.mode).toBe('INTAKE')
   expect(body.confirmation).toBe('VOICE')
-  expect(body.answers).toMatchObject({ urgent: false, callerRole: 'REPRESENTATIVE', identityDocument: 'UNKNOWN', contactValue: '01700000000', contactOwner: 'CALLER', smsSafe: false })
-  expect(body.aiFields).toEqual(expect.arrayContaining(['urgent', 'callerRole', 'identityDocument', 'contactValue', 'smsSafe']))
+  expect(body.answers).toMatchObject({ callerRole: 'REPRESENTATIVE', nidKnown: true, nid: '1234509876', urgent: false, contactChannel: 'PHONE', contactValue: '01700000000' })
+  expect(body.aiFields).toEqual(expect.arrayContaining(['callerRole', 'nidKnown', 'nid', 'urgent', 'contactValue']))
   expect(body.transcript).toHaveLength(asked.length) // one turn per answer
   await expect(page.getByRole('heading', { name: /আবেদন জমা হয়েছে/ })).toBeVisible({ timeout: 30000 })
 })

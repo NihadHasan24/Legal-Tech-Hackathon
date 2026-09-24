@@ -9,6 +9,9 @@ import { hashPassword } from './utils/password.js'
 import { submitVoiceIntake } from './services/applicationService.js'
 import { getSession } from './services/authService.js'
 
+// Live voice AI stays off here even when server/.env has a Groq key: no paid calls, and results stay deterministic.
+// The AI outline test below turns it on against a stubbed Groq response.
+process.env.VOICE_AI = 'off'
 const databaseName = `dlas_step2_test_${randomBytes(6).toString('hex')}`
 const server = createServer(app)
 let baseUrl
@@ -220,9 +223,9 @@ test('Step 4 voice intake keeps representative provenance, the recording notice,
   const ripon = {
     mode: 'INTAKE',
     answers: {
-      urgent: false, callerRole: 'REPRESENTATIVE', callerName: 'Fictional Ripon', relationship: 'Brother', applicantName: 'Fictional Moyuri',
-      identityDocument: 'UNAVAILABLE', problem: 'Fictional representative report.', district: 'Joypurhat', contactChannel: 'PHONE',
-      contactValue: '01700000000', contactOwner: 'CALLER', safeTime: 'Weekday morning', smsSafe: false,
+      callerRole: 'REPRESENTATIVE', callerName: 'Fictional Ripon', relationship: 'Brother', applicantName: 'Fictional Moyuri',
+      district: 'Joypurhat', nidKnown: false, problem: 'Fictional representative report.', urgent: false,
+      contactChannel: 'PHONE', contactValue: '01700000000', safeTime: 'Weekday morning',
     },
     correctedFields: ['district'],
   }
@@ -233,21 +236,24 @@ test('Step 4 voice intake keeps representative provenance, the recording notice,
   delete withoutCaller.callerName
   assert.equal((await post({ ...ripon, answers: withoutCaller })).status, 400)
   assert.equal((await fetch(`${baseUrl}/api/voice/intakes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })).status, 400)
+  // The old danger shortcut is gone: a reported danger continues the intake instead.
+  assert.equal((await post({ mode: 'CALLBACK', callbackReason: 'URGENT_HANDOFF', answers: { contactValue: '01800000000', safeTime: 'Evening', district: 'Barguna', urgent: true } })).status, 400)
 
   const submitted = await post(ripon)
   assert.equal(submitted.status, 201)
   const { applicationId } = submitted.data
   assert.match(applicationId, /^APP-\d{4}-\d{6}$/)
+  assert.match(submitted.data.lookupCode, /^\d{6}$/) // a PIN the caller can hear and say back
   assert.equal(await models.Application.countDocuments({ applicationId, caseId: { $exists: true } }), 0)
   const representation = await models.Representation.findOne({ applicationId }).lean()
   assert.equal(representation.authorityStatus, 'PENDING')
   const facts = await models.CaseFact.find({ applicationId }).lean()
-  assert.equal(facts.length, 4)
+  assert.deepEqual(facts.map((fact) => fact.field).sort(), ['complaint.summary', 'contact.preference', 'identity.nid_known', 'location.district', 'safety.urgent'])
   assert.ok(facts.every((fact) => fact.sourceType === 'REPRESENTATIVE_REPORTED' && fact.callerConfirmed && !fact.applicantConfirmed && fact.sourcePersonId.equals(representation.representativePersonId)))
-  // Only a signed-in citizen calling for themselves is linked as the applicant.
+  // Only a signed-in citizen complaining for themselves is linked as the applicant.
   const citizen = await actor('test4.citizen', 'CITIZEN')
   const self = { ...ripon.answers, callerRole: 'SELF' }
-  for (const key of ['callerName', 'relationship', 'contactOwner']) delete self[key]
+  for (const key of ['relationship', 'applicantName']) delete self[key]
   const linked = async (who, body) => (await submitVoiceIntake(body, await getSession(who.token))).authenticated
   assert.equal(await linked(officer, ripon), false)
   assert.equal(await linked(citizen, ripon), false)
@@ -255,12 +261,14 @@ test('Step 4 voice intake keeps representative provenance, the recording notice,
   assert.equal((await models.Person.findById(representation.applicantPersonId).lean()).identityStatus, 'INCOMPLETE')
   assert.equal(await models.ConsentRecord.countDocuments({ applicationId }), 0)
   const profile = await models.SafeContactProfile.findOne({ applicationId }).lean()
-  assert.deepEqual([profile.allowedChannels, profile.prohibitedChannels, profile.neutralWordingRequired], [['PHONE'], ['SMS'], true])
+  assert.deepEqual([profile.allowedChannels, profile.prohibitedChannels, profile.smsSafe, profile.neutralWordingRequired], [['PHONE'], ['SMS'], false, true])
   assert.ok(profile.contactOwnerPersonId.equals(representation.representativePersonId))
   const record = await request(`/api/applications/${applicationId}`, { token: officer.token })
   assert.equal(record.data.channel, 'VOICE_SIM')
   assert.deepEqual(record.data.representation, { representativeName: 'Fictional Ripon', relationship: 'Brother', authorityStatus: 'PENDING' })
+  assert.deepEqual(record.data.vulnerability, ['REPRESENTATIVE_CALLER', 'NID_UNKNOWN'])
   assert.equal(record.data.nextTask.title, 'Review 16699 voice intake')
+  assert.match(record.data.nextTask.nextAction, /NID not known: the caller was advised to verify identity at the nearest UDC\. .*No SMS or voicemail\./)
   assert.equal((await request('/api/workspace?role=DLAO_OFFICER', { token: officer.token })).data.records.filter((item) => item.applicationId === applicationId).length, 1)
 
   const unknown = await request(`/api/applications/${applicationId}/contact-attempts`, { method: 'POST', token: officer.token, body: { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call: an unknown person answered.' } })
@@ -274,17 +282,74 @@ test('Step 4 voice intake keeps representative provenance, the recording notice,
     assert.ok(audit.events.some((event) => event.action === action), action)
   }
 
-  // A late upload is refused even with the right code: the recording must arrive with the call.
+  // A late upload is refused even with the right PIN: the recording must arrive with the call.
   await models.Application.collection.updateOne({ applicationId }, { $set: { createdAt: new Date(Date.now() - 16 * 60 * 1000) } })
   const late = await fetch(`${baseUrl}/api/voice/intakes/${applicationId}/recording`, { method: 'POST', headers: { 'content-type': 'audio/webm', 'x-lookup-code': submitted.data.lookupCode }, body: Buffer.alloc(2000) })
   assert.equal(late.status, 403)
 
-  const urgentAnswers = { contactValue: '01800000000', safeTime: 'Evening', district: 'Barguna', urgent: true }
-  assert.equal((await post({ mode: 'CALLBACK', callbackReason: 'LIVE_VOICE_REFUSED', answers: urgentAnswers })).status, 400)
-  const callback = await post({ mode: 'CALLBACK', callbackReason: 'URGENT_HANDOFF', answers: urgentAnswers })
-  assert.equal(callback.status, 201)
-  assert.ok((await models.CaseFact.find({ applicationId: callback.data.applicationId }).lean()).every((fact) => fact.sourceType === 'UNKNOWN_OR_UNVERIFIED' && !fact.applicantConfirmed))
-  assert.equal((await models.Task.findOne({ applicationId: callback.data.applicationId }).lean()).title, 'Urgent human callback requested')
+  // A caller in danger keeps going: the NID and the story are kept, the risk is flagged for the officer, and the
+  // NID never enters the audit trail. (Service calls, so the public per-IP limit stays for the route checks above.)
+  assert.equal((await post({ ...ripon, answers: { ...ripon.answers, nidKnown: true, nid: '12345' } })).status, 400)
+  const danger = await submitVoiceIntake({ mode: 'INTAKE', answers: {
+    callerRole: 'SELF', callerName: 'Fictional Rahima', district: 'Barguna', nidKnown: true, nid: '0000000000',
+    problem: 'Fictional account: threatened at home last night.', urgent: true, contactChannel: 'UDC', safeTime: 'Evening after 6 pm',
+  } })
+  const dangerFacts = Object.fromEntries((await models.CaseFact.find({ applicationId: danger.applicationId }).lean()).map((fact) => [fact.field, fact]))
+  assert.equal(dangerFacts['identity.nid'].value, '0000000000')
+  assert.equal(dangerFacts['safety.urgent'].value, 'YES')
+  assert.ok(dangerFacts['identity.nid'].applicantConfirmed && dangerFacts['identity.nid'].sourceType === 'APPLICANT_REPORTED')
+  assert.equal((await models.SafeContactProfile.findOne({ applicationId: danger.applicationId }).lean()).allowedChannels[0], 'IN_PERSON') // UDC: met in person
+  const dangerAudit = await models.AuditEvent.find({ applicationId: danger.applicationId }).lean()
+  assert.ok(!JSON.stringify(dangerAudit).includes('0000000000'))
+  assert.equal(dangerAudit.find((event) => event.action === 'APPLICATION_SUBMITTED').newState.nidProvided, true)
+  const queued = (await request('/api/workspace?role=DLAO_OFFICER', { token: officer.token })).data.records.find((item) => item.applicationId === danger.applicationId)
+  assert.deepEqual(queued.vulnerability, ['SAFETY_RISK'])
+  assert.ok(queued.flags.some((flag) => flag.code === 'URGENT_RECOMMENDATION'))
+  assert.equal((await models.Person.findById((await models.Application.findOne({ applicationId: danger.applicationId }).lean()).applicantPersonId).lean()).identityStatus, 'PENDING_REVIEW')
+
+  // A trusted person is reached on their own phone, and that person is recorded as the number's owner.
+  const trusted = await submitVoiceIntake({ mode: 'INTAKE', answers: { ...self, contactChannel: 'TRUSTED_PERSON', contactValue: undefined, trustedPerson: 'Fictional aunt', trustedPhone: '01900000000' } })
+  const trustedProfile = await models.SafeContactProfile.findOne({ applicationId: trusted.applicationId }).populate('contactOwnerPersonId', 'displayName').lean()
+  assert.deepEqual([trustedProfile.contactValue, trustedProfile.contactOwnerPersonId.displayName, trustedProfile.prohibitedChannels], ['01900000000', 'Fictional aunt', ['SMS']])
+})
+
+test('16699 advice request: a helpline callback closes it or turns the same record into a complaint for DLAO review', async () => {
+  const officer = await actor('advice.officer', 'DLAO_OFFICER')
+  const helpline = await actor('advice.helpline', 'HELPLINE_AGENT')
+  const ask = (adviceTopic) => submitVoiceIntake({ mode: 'ADVICE', answers: { adviceTopic, contactValue: '01700000000', safeTime: 'Weekday afternoon' } })
+  const wages = await ask('Fictional question about unpaid wages.')
+  const land = await ask('Fictional question about a land deed.')
+  const dlaoQueue = async () => (await request('/api/workspace?role=DLAO_OFFICER', { token: officer.token })).data.records.map((item) => item.applicationId)
+  const callbacks = async () => (await request('/api/workspace?role=HELPLINE_AGENT', { token: helpline.token })).data.records
+  assert.ok(!(await dlaoQueue()).includes(wages.applicationId)) // advice waits for the helpline, not the DLAO queue
+  const waiting = (await callbacks()).find((item) => item.applicationId === wages.applicationId)
+  assert.deepEqual([waiting.topic, waiting.contactValue, waiting.safeTime], ['Fictional question about unpaid wages.', '01700000000', 'Weekday afternoon'])
+  const facts = await models.CaseFact.find({ applicationId: wages.applicationId }).lean()
+  assert.deepEqual(facts.map((fact) => [fact.field, fact.sourceType]), [['advice.topic', 'UNKNOWN_OR_UNVERIFIED']])
+
+  const outcome = (id, body, token = helpline.token) => request(`/api/applications/${id}/advice-outcome`, { method: 'POST', token, body })
+  const guidance = 'Explained the wage claim steps and the documents to keep.'
+  assert.equal((await outcome(wages.applicationId, { outcome: 'FORMAL_ASSISTANCE', guidance })).status, 400) // needs the applicant
+  assert.equal((await outcome(wages.applicationId, { outcome: 'INFORMATION_PROVIDED', guidance, applicantName: 'Fictional' })).status, 400)
+  assert.equal((await outcome(wages.applicationId, { outcome: 'INFORMATION_PROVIDED', guidance }, officer.token)).status, 403)
+  assert.equal((await outcome(wages.applicationId, { outcome: 'FORMAL_ASSISTANCE', guidance, applicantName: 'Fictional Karim', district: 'Khulna', nid: '1234' })).status, 400)
+  const formal = await outcome(wages.applicationId, { outcome: 'FORMAL_ASSISTANCE', guidance, applicantName: 'Fictional Karim', district: 'Khulna', nid: '0000000000000' })
+  assert.equal(formal.status, 200)
+  assert.equal(formal.data.service, 'COMPLAINT')
+  assert.equal((await outcome(wages.applicationId, { outcome: 'INFORMATION_PROVIDED', guidance })).status, 409)
+  assert.ok((await dlaoQueue()).includes(wages.applicationId))
+  const record = (await request(`/api/applications/${wages.applicationId}`, { token: officer.token })).data
+  assert.deepEqual([record.applicantName, record.identityStatus, record.nextTask.title], ['Fictional Karim', 'PENDING_REVIEW', 'Review new application'])
+  assert.equal(await models.Task.countDocuments({ applicationId: wages.applicationId, kind: 'ADVICE_CALLBACK', status: 'DONE' }), 1)
+
+  assert.equal((await outcome(land.applicationId, { outcome: 'INFORMATION_PROVIDED', guidance: 'Explained where to get a certified copy of the deed.' })).status, 200)
+  assert.ok(!(await callbacks()).some((item) => [wages.applicationId, land.applicationId].includes(item.applicationId)))
+  assert.ok(!(await dlaoQueue()).includes(land.applicationId))
+  for (const id of [wages.applicationId, land.applicationId]) {
+    const audit = (await request(`/api/applications/${id}/audit`, { token: officer.token })).data
+    assert.equal(audit.valid, true)
+    assert.ok(audit.events.some((event) => event.action === 'ADVICE_OUTCOME_RECORDED'))
+  }
 })
 
 test('Step 5 voice AI: transcription route guards, AI provenance, transcript, and the stored call recording', async () => {
@@ -301,7 +366,7 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
 
   const intake = {
     mode: 'INTAKE', confirmation: 'VOICE', aiSensitive: true,
-    answers: { urgent: false, callerRole: 'REPRESENTATIVE', callerName: 'Fictional Ripon', relationship: 'Brother', applicantName: 'Fictional Moyuri', identityDocument: 'UNAVAILABLE', problem: 'Fictional spoken report.', district: 'Joypurhat', contactChannel: 'IN_PERSON', safeTime: 'Weekday morning' },
+    answers: { callerRole: 'REPRESENTATIVE', callerName: 'Fictional Ripon', relationship: 'Brother', applicantName: 'Fictional Moyuri', district: 'Joypurhat', nidKnown: false, problem: 'Fictional spoken report.', urgent: false, contactChannel: 'UDC', safeTime: 'Weekday morning' },
     aiFields: ['problem', 'district', 'callerRole'],
     transcript: [{ speaker: 'ASSISTANT', text: 'আপনি কার জন্য ফোন করছেন?' }, { speaker: 'CALLER', text: 'আমার বোনের জন্য।' }],
   }
@@ -315,7 +380,7 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
   const facts = await models.CaseFact.find({ applicationId }).lean()
   const byField = Object.fromEntries(facts.map((fact) => [fact.field, fact]))
   assert.equal(byField['complaint.summary'].aiInferred, true)
-  assert.equal(byField['identity.document_access'].aiInferred, false)
+  assert.equal(byField['identity.nid_known'].aiInferred, false)
   assert.ok(facts.every((fact) => fact.sourceType === 'REPRESENTATIVE_REPORTED' && !fact.applicantConfirmed))
   const record = await request(`/api/applications/${applicationId}`, { token: officer.token })
   assert.match(record.data.nextTask.nextAction, /AI flagged possible violence/)
@@ -346,6 +411,33 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
   const trail = (await request(`/api/applications/${applicationId}/audit`, { token: officer.token })).data
   assert.equal(trail.valid, true)
   assert.equal(trail.events.find((event) => event.action === 'CALL_RECORDING_STORED').newState.bytes, 4000)
+})
+
+test('the AI outline of a complaint is kept as unverified suggestions and never blocks the submission', async () => {
+  const realFetch = globalThis.fetch
+  const realKey = process.env.GROQ_API_KEY
+  const answers = { callerRole: 'SELF', callerName: 'Fictional Shila', district: 'Rangpur', nidKnown: false, problem: 'Fictional account: the employer has not paid wages for three months.', urgent: false, contactChannel: 'UDC', safeTime: 'Morning' }
+  // Only Groq is stubbed; calls to this test's own server pass through.
+  const withGroq = async (reply, work) => {
+    process.env.VOICE_AI = 'on'
+    process.env.GROQ_API_KEY = realKey || 'test-key'
+    globalThis.fetch = (url, init) => String(url).startsWith('https://api.groq.com/') ? Promise.resolve(reply()) : realFetch(url, init)
+    try { return await work() } finally {
+      globalThis.fetch = realFetch
+      process.env.VOICE_AI = 'off'
+      if (realKey === undefined) delete process.env.GROQ_API_KEY
+      else process.env.GROQ_API_KEY = realKey
+    }
+  }
+  const outline = { what: 'মজুরি দেওয়া হয়নি', when: 'তিন মাস ধরে', where: null, who: 'মালিক', type: 'MURDER', legalNeed: 'বকেয়া মজুরি আদায়ে সহায়তা' }
+  const kept = await withGroq(() => Response.json({ choices: [{ message: { content: JSON.stringify(outline) } }] }), () => submitVoiceIntake({ mode: 'INTAKE', answers }))
+  const aiFacts = await models.CaseFact.find({ applicationId: kept.applicationId, sourceType: 'AI_INFERRED' }).lean()
+  // An unknown type and an empty place are dropped; the rest stay unconfirmed AI output.
+  assert.deepEqual(aiFacts.map((fact) => fact.field).sort(), ['complaint.legal_need', 'incident.what', 'incident.when', 'incident.who'])
+  assert.ok(aiFacts.every((fact) => fact.aiInferred && fact.captureMethod === 'AI' && !fact.callerConfirmed && !fact.applicantConfirmed))
+  const failed = await withGroq(() => new Response('', { status: 500 }), () => submitVoiceIntake({ mode: 'INTAKE', answers }))
+  assert.equal(await models.CaseFact.countDocuments({ applicationId: failed.applicationId, sourceType: 'AI_INFERRED' }), 0)
+  assert.equal(await models.CaseFact.countDocuments({ applicationId: failed.applicationId }), 5) // the caller's answers are all there
 })
 
 test('Step 6 queue, human priority override, case reconstruction, and bounded helpline lookup', async () => {

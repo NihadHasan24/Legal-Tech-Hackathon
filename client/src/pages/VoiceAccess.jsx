@@ -1,12 +1,13 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { api } from '../services/api.js'
-import { appendTranscript, applyExtraction, closeMicrophone, openMicrophone, spokenDigits, spokenKey, startRecording } from '../utils/voiceAgent.js'
-import { activeFields, answer, correct, nextField, payload, startCall, steps } from '../utils/voiceScript.js'
+import { appendTranscript, applyExtraction, closeMicrophone, digitsFromWords, openMicrophone, spokenDigits, spokenKey, spokenYesNo, startRecording } from '../utils/voiceAgent.js'
+import { activeFields, answer, correct, modeOf, nextField, notices, payload, startCall, steps } from '../utils/voiceScript.js'
 import { getLang, useLang } from '../components/Bi.jsx'
 
 // A phone-call screen for the 16699 simulation, run like an IVR line: a recorded Bangla clip asks each question and,
-// after the beep, the caller answers by voice (then pauses or presses #) or on the keypad. A spoken safe number is read
-// back digit by digit for the caller to confirm, so it is taken by voice only once those clips exist.
+// after the beep, the caller answers by voice (then pauses or presses #) or on the keypad. A spoken number (phone or
+// NID) is read back digit by digit for the caller to confirm, so it is taken by voice only once those clips exist.
+// A complaint ends by reading out the application number and status PIN; an advice request ends with a callback.
 // The whole call is recorded under the greeting's notice. The clips are recorded in Bangla only, so English mode shows
 // the questions as text and skips the clips (like light mode) until English recordings exist.
 const copies = { bn: {
@@ -25,7 +26,8 @@ const copies = { bn: {
   submitting: 'আবেদন জমা হচ্ছে…',
   micDenied: 'মাইক্রোফোন চালু করা যায়নি। এই কল শুরু করতে মাইক্রোফোনের অনুমতি দিন।',
   voiceOff: 'এখন আপনার বলা উত্তরটি বোঝা যাচ্ছে না। লিখে উত্তর দিন; আগের উত্তরগুলো রাখা আছে।',
-  urgent: 'আপনার নিরাপত্তাই আগে। শুধু যোগাযোগের তথ্য নেব, একজন কর্মী ফোন করবেন। তাৎক্ষণিক বিপদে ৯৯৯-এ ফোন করুন।',
+  urgent: 'আপনার নিরাপত্তাই আগে। অভিযোগটি জরুরি হিসেবে কর্মকর্তার কাছে যাবে। জীবন ঝুঁকিতে থাকলে এখনই ৯৯৯-এ ফোন করুন।',
+  nidUnknown: 'নিকটস্থ ইউডিসি অফিসে পরিচয় যাচাই করা যাবে। এখন অভিযোগটি বলুন।',
   representative: 'তথ্যগুলো প্রতিনিধি জানিয়েছেন। আবেদনকারী নিজে নিশ্চিত না করা পর্যন্ত সেভাবেই নথিতে থাকবে।',
   failed: 'জমা দেওয়া যায়নি; আপনার উত্তরগুলো রাখা আছে। আবার ১ চাপুন।',
   uploading: 'আবেদন জমা হয়েছে। কলের রেকর্ডিং সংরক্ষণ হচ্ছে; এই পৃষ্ঠা খোলা রাখুন।',
@@ -34,9 +36,10 @@ const copies = { bn: {
   recordingUnavailable: 'আবেদন জমা হয়েছে, কিন্তু কলের রেকর্ডিং সংরক্ষণ করা যায়নি। আবেদন নম্বর লিখে রাখুন এবং কর্মীর সাহায্য নিন।',
   retryRecording: 'রেকর্ডিং আবার পাঠান',
   review: 'একজন লিগ্যাল এইড কর্মকর্তা আবেদনটি দেখে যোগাযোগ করবেন।',
-  callback: 'একজন কর্মী আপনার দেওয়া নিরাপদ নম্বরে, নিরাপদ সময়ে ফোন করবেন।',
-  code: 'আবেদনের অবস্থা জানার গোপন কোড',
-  codeNote: 'কোডটি একবারই দেখানো হচ্ছে। লিখে রাখুন, কাউকে দেবেন না।',
+  adviceDone: 'প্রশ্ন গ্রহণ করা হয়েছে',
+  adviceNext: 'একজন লিগ্যাল এইড কর্মকর্তা আপনার দেওয়া নিরাপদ নম্বরে, নিরাপদ সময়ে ফোন করবেন।',
+  code: 'অগ্রগতি জানার গোপন পিন',
+  codeNote: 'আবেদন নম্বর ও পিন দিয়ে ১৬৬৯৯-এ অগ্রগতি জানা যাবে। পিনটি একবারই দেখানো হচ্ছে; লিখে রাখুন, কাউকে দেবেন না।',
   newCall: 'নতুন কল',
   title: 'লিগ্যাল এইড হেল্পলাইন',
   keypad: 'কিপ্যাড',
@@ -46,6 +49,10 @@ const copies = { bn: {
   submitted: 'আবেদন জমা হয়েছে',
   erase: 'মুছুন',
   heardNumber: 'আপনার বলা নম্বর',
+  gaveNumber: 'আপনার দেওয়া নম্বর',
+  digitCount: 'অঙ্ক',
+  nidRule: 'NID নম্বর ১০, ১৩ বা ১৭ অঙ্কের হয়।',
+  phoneRule: 'ফোন নম্বর কমপক্ষে ৬ অঙ্কের হয়।',
   correct: 'ঠিক আছে',
   wrong: 'ভুল',
 }, en: {
@@ -64,7 +71,8 @@ const copies = { bn: {
   submitting: 'Submitting the application…',
   micDenied: 'The microphone could not start. Allow microphone access to begin this call.',
   voiceOff: 'Voice understanding is not available right now. Type your answer; your answers are kept.',
-  urgent: 'Your safety comes first. We will take only contact details and a staff member will call you. In immediate danger, call 999.',
+  urgent: 'Your safety comes first. The complaint goes to an officer as urgent. If a life is at risk, call 999 now.',
+  nidUnknown: 'Identity can be verified at the nearest UDC office. Now tell us the complaint.',
   representative: 'This information comes from a representative; it stays that way until the applicant confirms it.',
   failed: 'Could not submit; your answers are kept. Press 1 again.',
   uploading: 'Application submitted. Saving the call recording; keep this page open.',
@@ -73,9 +81,10 @@ const copies = { bn: {
   recordingUnavailable: 'Application submitted, but the call recording could not be saved. Note the application number and ask staff for help.',
   retryRecording: 'Send the recording again',
   review: 'A legal aid officer will review the application and contact you.',
-  callback: 'A staff member will call the safe number you gave, at the safe time.',
-  code: 'Secret code for checking status',
-  codeNote: 'This code is shown only once. Write it down and do not share it.',
+  adviceDone: 'Question received',
+  adviceNext: 'A legal aid officer will call the safe number you gave, at the safe time.',
+  code: 'Secret PIN for checking progress',
+  codeNote: 'Call 16699 with the application number and PIN to check progress. The PIN is shown only once; write it down and do not share it.',
   newCall: 'New call',
   title: 'Legal Aid Helpline',
   keypad: 'Keypad',
@@ -85,6 +94,10 @@ const copies = { bn: {
   submitted: 'Application submitted',
   erase: 'Erase',
   heardNumber: 'The number you said',
+  gaveNumber: 'The number you gave',
+  digitCount: 'digits',
+  nidRule: 'An NID number has 10, 13, or 17 digits.',
+  phoneRule: 'A phone number has at least 6 digits.',
   correct: 'Correct',
   wrong: 'Wrong',
 } }
@@ -101,11 +114,21 @@ const NO_INPUT_MS = 12000 // a choice or number question waits this long before 
 const MIN_SPOKEN_MS = 700 // a # sooner than this after the beep counts as no answer
 const MAX_MISSES = 2 // after this many "no answer" clips in a row, wait quietly for a key
 const PAUSE_MS = 2500 // a spoken answer ends when the caller has been quiet this long, as if they pressed #
-const LONG_PAUSE_MS = 4000 // the problem is told in the caller's own words, with longer pauses to think
+const LONG_PAUSE_MS = 4000 // the complaint in the caller's own words, and numbers said in groups, pause longer
 const QUICK_PAUSE_MS = 1500 // a yes/no or a choice is one or two words
+// A typed number ends after this long without a key; longer than a spoken pause, since callers read digits off a card.
+// Calibration knob: too short cuts a 13- or 17-digit NID at 10 digits if the caller stops to look; # never waits.
+const TYPED_PAUSE_MS = 4000
 const READ_BACK_CLIPS = [...[...'0123456789'].map((digit) => `digit${digit}`), 'numberConfirm']
+const clipExists = (clip) => fetch(`/audio/${clip}.mp3`, { method: 'HEAD' })
+  .then((response) => response.ok && /^audio\//.test(response.headers.get('content-type') ?? ''), () => false)
+const asciiKey = (key) => (key.length === 1 && '০১২৩৪৫৬৭৮৯'.includes(key) ? String('০১২৩৪৫৬৭৮৯'.indexOf(key)) : key)
 const bnDigits = (value) => (bn() ? value.replace(/[0-9]/g, (digit) => '০১২৩৪৫৬৭৮৯'[digit]) : value)
-const kindOf = (field) => (!field ? 'READBACK' : steps[field].choices ? 'CHOICE' : steps[field].tel ? 'DIGITS' : 'SPOKEN')
+const digitClips = (value) => [...value.replace(/[^0-9]/g, '')].map((digit) => `digit${digit}`)
+// A complaint ends by reading out its application number and status PIN, digit by digit; advice ends with a callback.
+const endClips = (call, { applicationId, lookupCode }) => (modeOf(call) === 'ADVICE' ? ['adviceDone']
+  : ['submitted', ...digitClips(applicationId), 'pin', ...digitClips(lookupCode), 'submittedEnd'])
+const kindOf = (field) => (!field ? 'READBACK' : steps[field].choices ? 'CHOICE' : steps[field].digits ? 'DIGITS' : 'SPOKEN')
 const lightMode = () => { try { return localStorage.getItem('dlas-light-mode') === '1' } catch { return false } }
 
 const PhoneIcon = () => <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.6 21 3 13.4 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.6a1 1 0 0 1-.25 1z" /></svg>
@@ -186,7 +209,7 @@ function Readback({ call, recordings, onCorrect }) {
   const copy = copies[useLang()]
   return (
     <>
-      {call.mode === 'INTAKE' && call.answers.callerRole === 'REPRESENTATIVE' && <p className="call-note">{copy.representative}</p>}
+      {modeOf(call) === 'INTAKE' && call.answers.callerRole === 'REPRESENTATIVE' && <p className="call-note">{copy.representative}</p>}
       <dl className="details readback">
         {activeFields(call).map((field) => <div key={field}>
           <dt>{labelOf(field)}</dt>
@@ -213,7 +236,8 @@ export default function VoiceAccess({ session }) {
   const [recordings, setRecordings] = useState({})
   const [submission, setSubmission] = useState({ status: 'IDLE' })
   const [starting, setStarting] = useState(false)
-  const [heardNumber, setHeardNumber] = useState({ turn: 'IDLE', value: null })
+  const [heardNumber, setHeardNumber] = useState({ field: null, value: null })
+  const [wrongNumber, setWrongNumber] = useState({ field: null, digits: '' })
   const promptRef = useRef(null)
   const streamRef = useRef(null)
   const callRecorderRef = useRef(null)
@@ -229,11 +253,12 @@ export default function VoiceAccess({ session }) {
   const transcriptRef = useRef([])
   const pendingRecordingRef = useRef(null)
   const readBackReadyRef = useRef(false) // every clip needed to read a spoken number back exists
+  const numberWrongRef = useRef(false) // the optional "that number is incomplete" clip exists
   const field = call ? nextField(call) : undefined
   const done = ['DONE', 'UPLOADING_RECORDING', 'RECORDING_FAILED'].includes(submission.status)
-  const question = call ? `${call.mode}:${field ?? 'READBACK'}:${done}:${attempt}` : 'IDLE'
-  // A spoken number waiting for the caller's yes/no belongs to the question it was heard on.
-  const spokenNumber = heardNumber.turn === question ? heardNumber.value : null
+  const question = call ? `${field ?? 'READBACK'}:${done}:${attempt}` : 'IDLE'
+  // A spoken number waiting for the caller's yes/no belongs to its question until a yes or no; asking again keeps it.
+  const spokenNumber = heardNumber.field === field ? heardNumber.value : null
   const kind = spokenNumber ? 'CONFIRM' : kindOf(field)
   const turn = spokenNumber ? `${question}:CONFIRM` : question
   // Mode and typed digits belong to the question they were set for, so a new question starts clean. Without voice
@@ -252,11 +277,11 @@ export default function VoiceAccess({ session }) {
     playerRef.current.stop()
     promptRef.current?.focus()
     if (missesRef.current.field !== field) missesRef.current = { field, count: 0 }
-    const intro = field && (call.mode === 'INTAKE' ? 'greeting' : 'urgentHandoff')
-    const intros = intro && !introsRef.current.has(intro) && (call.mode === 'CALLBACK' || field === 'urgent') ? [intro] : []
+    const intros = done ? [] : notices(call).filter((clip) => !introsRef.current.has(clip))
     intros.forEach((clip) => introsRef.current.add(clip))
-    const ask = kind === 'CONFIRM' ? [...[...spokenNumber].map((digit) => `digit${digit}`), 'numberConfirm'] : [field ?? 'readback']
-    const clips = [...leadRef.current, ...intros, ...(done ? submission.status === 'DONE' ? ['submitted'] : [] : ask)]
+    // Once submitted (while the recording uploads too), the ending plays; * plays it again.
+    const ask = done ? endClips(call, submission) : kind === 'CONFIRM' ? [...digitClips(spokenNumber), 'numberConfirm'] : [field ?? 'readback']
+    const clips = [...leadRef.current, ...intros, ...ask]
     leadRef.current = []
     const finished = lightMode() || !bn() || await playerRef.current.play(clips)
     if (finished && run === runRef.current && !done) listen()
@@ -268,9 +293,9 @@ export default function VoiceAccess({ session }) {
     if (event.key === 'Backspace' && kind === 'DIGITS') {
       event.preventDefault()
       editDigits((value) => value.slice(0, -1))
-    } else if (KEYS.includes(event.key)) {
+    } else if (KEYS.includes(asciiKey(event.key))) {
       event.preventDefault()
-      pressKey(event.key)
+      pressKey(asciiKey(event.key))
     }
   })
   useEffect(() => {
@@ -299,7 +324,7 @@ export default function VoiceAccess({ session }) {
     if (voiceOff || !streamRef.current || (kind === 'DIGITS' && !readBackHeard)) return waitForKeys()
     const words = kind === 'SPOKEN' || kind === 'DIGITS'
     try {
-      const pause = { context: toneRef.current, pauseMs: words ? steps[field].long ? LONG_PAUSE_MS : PAUSE_MS : QUICK_PAUSE_MS, onPause: () => { playTone(toneRef.current, [480], 150); finishSpoken() } }
+      const pause = { context: toneRef.current, pauseMs: words ? steps[field].long || kind === 'DIGITS' ? LONG_PAUSE_MS : PAUSE_MS : QUICK_PAUSE_MS, onPause: () => { playTone(toneRef.current, [480], 150); finishSpoken() } }
       answerRef.current = { recorder: startRecording(streamRef.current, pause), startedAt: Date.now() }
     } catch {
       return waitForKeys()
@@ -335,14 +360,28 @@ export default function VoiceAccess({ session }) {
     setAttempt((value) => value + 1)
   }
 
+  // "No" to a read-back number: drop it and ask for the number again.
+  function wrongHeardNumber() {
+    setHeardNumber({ field: null, value: null })
+    repeat()
+  }
+
+  // A number was given but has the wrong length: show what arrived, and say so if that clip exists.
+  function rejectNumber(digits) {
+    setWrongNumber({ field, digits })
+    repeat(digits && numberWrongRef.current ? 'numberWrong' : 'noInput')
+  }
+
   function choose(value, via) {
     cancelAnswer()
+    setHeardNumber({ field: null, value: null })
     setRecordings((existing) => ({ ...existing, [field]: undefined })) // a keyed, typed, or read-back answer has no voice clip
     setCall(answer(call, field, value, via))
   }
 
   function pressKey(key) {
-    if (!call || done || mode === 'PROCESSING' || submission.status === 'PROCESSING') return
+    if (!call || mode === 'PROCESSING' || submission.status === 'PROCESSING') return
+    if (done) return key === '*' && repeat() // hear the application number and PIN again
     playTone(toneRef.current, DTMF[key])
     missesRef.current.count = 0
     if (key === '*') return repeat()
@@ -353,16 +392,19 @@ export default function VoiceAccess({ session }) {
     }
     if (key === '#' && answerRef.current) return finishSpoken()
     if (kind === 'READBACK') return key === '1' && submit()
-    if (kind === 'CONFIRM') return key === '1' ? choose(spokenNumber, 'AI') : key === '2' ? repeat() : repeat('wrongKey')
+    if (kind === 'CONFIRM') return key === '1' ? choose(spokenNumber, 'AI') : key === '2' ? wrongHeardNumber() : repeat('wrongKey')
     if (kind === 'CHOICE') {
       const option = steps[field].choices[Number(key) - 1]
       return option ? choose(option[0]) : repeat('wrongKey')
     }
     if (kind === 'DIGITS') {
-      if (key === '#') return /^[0-9]{6,20}$/.test(digits) ? choose(digits) : repeat('noInput')
+      if (key === '#') return steps[field].digits.test(digits) ? choose(digits) : rejectNumber(digits)
       if (answerRef.current) { cancelAnswer(); setMode('WAITING') } // typing the number instead of saying it
-      editDigits((value) => (value + key).slice(0, 20))
-      return armNoInput()
+      const typed = (digits + key).slice(0, 20)
+      editDigits(() => typed)
+      // As the clip says, a pause ends a typed number like # does: complete, it is taken; incomplete, the caller is told.
+      clearTimeout(timerRef.current)
+      timerRef.current = steps[field].digits.test(typed) ? setTimeout(() => choose(typed), TYPED_PAUSE_MS) : setTimeout(() => rejectNumber(typed), NO_INPUT_MS)
     }
   }
 
@@ -385,16 +427,23 @@ export default function VoiceAccess({ session }) {
       if (run !== runRef.current) return
       if (result.text) transcriptRef.current = appendTranscript(transcriptRef.current, 'CALLER', result.text)
       const key = spokenKey(result.text) // "এক" or "দুই" said instead of pressed
+      const yesNo = spokenYesNo(result.text) // "হ্যাঁ ঠিক হয়েছে", "না ভুল"
       if (readBack) {
-        const agreed = { 1: true, 2: false }[key] ?? result.values.confirm
-        if (agreed !== true) return repeat(agreed === false ? undefined : 'noInput')
+        const agreed = { 1: true, 2: false }[key] ?? yesNo ?? result.values.confirm
+        if (agreed === undefined || agreed === null) return repeat('noInput') // unclear: ask the same yes/no again
+        if (!agreed) return kind === 'CONFIRM' ? wrongHeardNumber() : repeat()
         return kind === 'READBACK' ? submit('VOICE') : choose(spokenNumber, 'AI')
       }
       if (kind === 'DIGITS') {
-        const number = spokenDigits(result.values[field])
-        return number ? setHeardNumber({ turn: question, value: number }) : repeat('noInput')
+        // Whisper's own digit words first; the model's reading gets a second chance only if those are not a whole number.
+        // Either way the caller hears the number read back and confirms it.
+        const heard = digitsFromWords(result.text)
+        const modelHeard = digitsFromWords(result.values[field])
+        const number = spokenDigits(heard, field) ?? spokenDigits(modelHeard, field)
+        return number ? setHeardNumber({ field, value: number }) : rejectNumber(heard ?? modelHeard ?? '')
       }
-      const option = kind === 'CHOICE' && steps[field].choices[key - 1]
+      const choices = kind === 'CHOICE' ? steps[field].choices : []
+      const option = choices[key - 1] ?? (choices.every(([value]) => typeof value === 'boolean') && choices.find(([value]) => value === yesNo))
       const { call: next, accepted } = applyExtraction(call, option ? { [field]: option[0] } : result.values)
       if (accepted.length) {
         const clipUrl = URL.createObjectURL(clip)
@@ -439,11 +488,10 @@ export default function VoiceAccess({ session }) {
       // Per-question state from an earlier call must not leak into the same question of this one.
       setModeState({ turn: 'IDLE', mode: 'PROMPT' })
       setDigitState({ turn: 'IDLE', value: '' })
-      setHeardNumber({ turn: 'IDLE', value: null })
+      setHeardNumber({ field: null, value: null })
       readBackReadyRef.current = false
-      Promise.all(READ_BACK_CLIPS.map((clip) => fetch(`/audio/${clip}.mp3`, { method: 'HEAD' })
-        .then((response) => response.ok && /^audio\//.test(response.headers.get('content-type') ?? ''), () => false)))
-        .then((found) => { readBackReadyRef.current = found.every(Boolean) })
+      Promise.all(READ_BACK_CLIPS.map(clipExists)).then((found) => { readBackReadyRef.current = found.every(Boolean) })
+      clipExists('numberWrong').then((found) => { numberWrongRef.current = found })
       streamRef.current = stream
       callRecorderRef.current = startRecording(stream)
       setMicOpen(true)
@@ -520,6 +568,7 @@ export default function VoiceAccess({ session }) {
     }
   }
 
+  const numberHint = kind === 'DIGITS' && wrongNumber.field === field && wrongNumber.digits !== ''
   const hints = { '*': copy.repeatKey }
   if (kind === 'CHOICE') steps[field].choices.forEach((choice, index) => { hints[index + 1] = choiceText(choice) })
   if (kind === 'DIGITS' || mode === 'RECORDING') hints['#'] = copy.finishKey
@@ -545,22 +594,28 @@ export default function VoiceAccess({ session }) {
             {mode === 'PROCESSING' && <p>{copy.transcribing}</p>}
             {submission.status === 'PROCESSING' && <p>{copy.submitting}</p>}
             {notice && <p>{notice}</p>}
-            {call.mode === 'CALLBACK' && field && <p className="call-note">{copy.urgent}</p>}
+            {/* Shown as well as spoken, for callers who see the screen without the recorded messages. */}
+            {!done && call.answers.urgent === true && <p className="call-note">{copy.urgent}</p>}
+            {!done && field === 'problem' && call.answers.nidKnown === false && <p className="call-note">{copy.nidUnknown}</p>}
           </div>
 
           {done
             ? <div className="call-turn">
-              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{copy.submitted}: <span lang="en" translate="no">{submission.applicationId}</span></h2>
-              <p>{call.mode === 'CALLBACK' ? copy.callback : copy.review}</p>
-              <p className="call-code">{copy.code}: <strong lang="en" translate="no">{submission.lookupCode}</strong></p>
-              <p className="muted">{copy.codeNote}</p>
+              {modeOf(call) === 'ADVICE'
+                ? <><h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{copy.adviceDone}</h2><p>{copy.adviceNext}</p></>
+                : <><h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{copy.submitted}: <span lang="en" translate="no">{submission.applicationId}</span></h2>
+                  <p>{copy.review}</p>
+                  <p className="call-code">{copy.code}: <strong translate="no">{bnDigits(submission.lookupCode)}</strong></p>
+                  <p className="muted">{copy.codeNote}</p></>}
+              {bn() && !lightMode() && <button type="button" className="text-button" onClick={() => repeat()}>{copy.repeatKey}</button>}
               {submission.status === 'UPLOADING_RECORDING' && <p role="status">{copy.uploading}</p>}
               {submission.status === 'RECORDING_FAILED' && <p role="alert" className="error">{!pendingRecordingRef.current ? copy.recordingMissing : submission.retryable ? copy.recordingFailed : copy.recordingUnavailable}</p>}
               {submission.status === 'RECORDING_FAILED' && submission.retryable && <button type="button" className="secondary-button" onClick={() => uploadRecording(submission)}>{copy.retryRecording}</button>}
               {submission.status === 'DONE' && <button type="button" className="secondary-button" onClick={() => setCall(null)}>{copy.newCall}</button>}
             </div>
             : <div className="call-turn">
-              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1}>{kind === 'CONFIRM' ? <>{copy.heardNumber}: <span translate="no">{bnDigits(spokenNumber)}</span></> : field ? promptOf(field) : copy.readback}</h2>
+              <h2 id="voice-prompt" ref={promptRef} tabIndex={-1} aria-describedby={numberHint ? 'number-hint' : undefined}>{kind === 'CONFIRM' ? <>{copy.heardNumber}: <span translate="no">{bnDigits(spokenNumber)}</span></> : field ? promptOf(field) : copy.readback}</h2>
+              {numberHint && <p id="number-hint" className="call-note">{copy.gaveNumber}: <span translate="no">{bnDigits(wrongNumber.digits)}</span> ({bnDigits(String(wrongNumber.digits.length))} {copy.digitCount}){bn() ? '।' : '.'} {field === 'nid' ? copy.nidRule : copy.phoneRule}</p>}
               {kind === 'DIGITS' && <div className="call-digits">
                 <output aria-label={labelOf(field)}>{bnDigits(digits)}</output>
                 {digits && <button type="button" className="text-button" onClick={() => editDigits((value) => value.slice(0, -1))}>{copy.erase}</button>}

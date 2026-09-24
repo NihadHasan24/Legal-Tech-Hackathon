@@ -12,7 +12,8 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   const submitted = page.getByText(/Application APP-\d{4}-\d{6} submitted to the DLAO queue/)
   await expect(submitted).toBeVisible()
   const applicationId = (await submitted.textContent()).match(/APP-\d{4}-\d{6}/)[0]
-  await expect(page.getByText('No records are available to this role yet.')).toBeVisible()
+  // The helpline list holds only 16699 advice callbacks, never the application it just submitted.
+  await expect(page.getByText('No advice requests are waiting for a callback.')).toBeVisible()
 
   await signOut(page)
   await signIn(page, 'DLAO_OFFICER')

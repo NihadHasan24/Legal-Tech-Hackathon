@@ -99,7 +99,7 @@ async function auditApplication(application, session, action, newState, reason, 
 export async function getDuplicateCandidates(applicationId, actor) {
   const application = await officeApplication(applicationId, actor)
   // ponytail: newest 100 same-office applications bound the prototype comparison; add paging for larger offices.
-  const candidates = await Application.find({ officeCode: application.officeCode, applicationId: { $ne: applicationId } })
+  const candidates = await Application.find({ officeCode: application.officeCode, applicationId: { $ne: applicationId }, service: { $ne: 'ADVICE' } })
     .sort({ createdAt: -1 }).limit(100).lean()
   const current = await Application.findOne({ applicationId }).lean()
   const all = [current, ...candidates]

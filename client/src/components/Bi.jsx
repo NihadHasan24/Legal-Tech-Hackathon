@@ -102,11 +102,19 @@ const words = {
   // Fact values
   YES: ['Yes', 'হ্যাঁ'], NO: ['No', 'না'], AVAILABLE: ['Available', 'আছে'], UNAVAILABLE: ['Not available', 'নেই'],
   URGENT_HANDOFF: ['Urgent callback', 'জরুরি ভিত্তিতে আবার ফোন করা'],
+  // 16699 call: service, contact route, advice outcome, what an officer weighs first, and how far a fact is verified
+  COMPLAINT: ['Complaint', 'অভিযোগ'], ADVICE: ['Information or advice', 'তথ্য বা পরামর্শ'], TRUSTED_PERSON: ['Through a trusted person', 'বিশ্বস্ত ব্যক্তির মাধ্যমে'],
+  INFORMATION_PROVIDED: ['Information given', 'তথ্য দেওয়া হয়েছে'], FORMAL_ASSISTANCE: ['Formal legal aid needed', 'আনুষ্ঠানিক আইনি সহায়তা দরকার'],
+  SAFETY_RISK: ['Safety risk reported', 'নিরাপত্তা ঝুঁকির কথা জানানো হয়েছে'], REPRESENTATIVE_CALLER: ['Reported by a representative', 'প্রতিনিধি জানিয়েছেন'],
+  NID_UNKNOWN: ['NID unknown: verify at a UDC', 'এনআইডি জানা নেই: ইউডিসিতে যাচাই'], AI_FLAGGED_DANGER: ['AI flagged possible danger', 'এআই সম্ভাব্য বিপদ চিহ্নিত করেছে'],
+  VICTIM_CONFIRMED: ['Victim confirmed', 'ভুক্তভোগী নিশ্চিত করেছেন'], VERIFICATION_REQUIRED: ['Verification required', 'যাচাই দরকার'],
+  ADVICE_OUTCOME_RECORDED: ['Advice call outcome recorded', 'পরামর্শ কলের ফল নথিভুক্ত'],
   // Server wording: task titles, fact fields, comparison rows
   'Review new application': ['Review new application', 'নতুন আবেদন পর্যালোচনা করুন'], 'Decide reviewed application': ['Decide reviewed application', 'পর্যালোচিত আবেদনে সিদ্ধান্ত দিন'],
   'Repeat application review': ['Repeat application review', 'আবেদন আবার পর্যালোচনা করুন'], 'Request missing information': ['Request missing information', 'বাকি তথ্য চেয়ে নিন'],
   'Plan next service step': ['Plan next service step', 'পরবর্তী সেবার ধাপ ঠিক করুন'], 'Plan safer follow-up': ['Plan safer follow-up', 'আবার কীভাবে নিরাপদে যোগাযোগ করবেন, তা ঠিক করুন'],
-  'Urgent human callback requested': ['Urgent human callback requested', 'জরুরি ফোন ফেরত দিতে হবে'], 'Review translated assisted intake': ['Review translated assisted intake', 'অনূদিত সহায়তা-আবেদন পর্যালোচনা করুন'],
+  'Urgent human callback requested': ['Urgent human callback requested', 'জরুরি ফোন ফেরত দিতে হবে'],
+  'Call back with legal information': ['Call back with legal information', 'ফোন করে আইনগত তথ্য দিন'], 'Review translated assisted intake': ['Review translated assisted intake', 'অনূদিত সহায়তা-আবেদন পর্যালোচনা করুন'],
   'Referral not acknowledged: follow up': ['Referral not acknowledged: follow up', 'রেফারেলের প্রাপ্তি স্বীকার হয়নি: খোঁজ নিন'],
   'Referral returned: review the reason': ['Referral returned: review the reason', 'রেফারেল ফেরত: কারণ দেখুন'],
   'Review applicant lawyer-change request': ['Review applicant lawyer-change request', 'আইনজীবী বদলের অনুরোধ দেখুন'],
@@ -114,7 +122,10 @@ const words = {
   'safety.urgent': ['Urgent danger', 'জরুরি বিপদ'], 'location.district': ['District', 'জেলা'], 'intake.callback_reason': ['Callback reason', 'ফোন ফেরতের কারণ'],
   'complaint.summary': ['Problem', 'সমস্যা'], 'complaint.original': ['Original statement', 'মূল বক্তব্য'], 'complaint.translation': ['Translation', 'অনুবাদ'],
   'identity.document_access': ['ID document', 'পরিচয়পত্র'], 'contact.phone': ['Contact number', 'যোগাযোগের নম্বর'], 'person.date_of_birth': ['Date of birth', 'জন্মতারিখ'],
-  'triage.case_category': ['Case type', 'মামলার ধরন'], Name: ['Name', 'নাম'], 'Contact number': ['Contact number', 'যোগাযোগের নম্বর'],
+  'triage.case_category': ['Case type', 'মামলার ধরন'], 'identity.nid_known': ['NID known', 'এনআইডি নম্বর জানা'], 'identity.nid': ['NID number', 'এনআইডি নম্বর'],
+  'contact.preference': ['Contact route', 'যোগাযোগের মাধ্যম'], 'advice.topic': ['Advice question', 'পরামর্শের প্রশ্ন'], 'advice.guidance': ['Information given', 'দেওয়া তথ্য'],
+  'incident.what': ['What happened', 'কী ঘটেছে'], 'incident.when': ['When', 'কখন'], 'incident.where': ['Where', 'কোথায়'], 'incident.who': ['Who was involved', 'কারা জড়িত'],
+  'complaint.type': ['Complaint type', 'অভিযোগের ধরন'], 'complaint.legal_need': ['Legal need', 'আইনি প্রয়োজন'], Name: ['Name', 'নাম'], 'Contact number': ['Contact number', 'যোগাযোগের নম্বর'],
   'Date of birth': ['Date of birth', 'জন্মতারিখ'], District: ['District', 'জেলা'],
 }
 
@@ -145,6 +156,15 @@ export const when = (value) => value ? new Intl.DateTimeFormat(language === 'bn'
 // Fixed sentences the server writes into records (task steps, queue flags, triage reasons, system audit reasons).
 const phrases = {
   'Not collected (callback request)': 'আবার ফোন করার অনুরোধে তথ্যটি নেওয়া হয়নি',
+  'Not collected (advice request)': 'পরামর্শের অনুরোধে তথ্যটি নেওয়া হয়নি',
+  'NID number given by the caller; verify it before relying on it.': 'কলার এনআইডি নম্বর দিয়েছেন; ব্যবহারের আগে যাচাই করুন।',
+  'NID not known: the caller was advised to verify identity at the nearest UDC.': 'এনআইডি নম্বর জানা নেই: কলারকে নিকটস্থ ইউডিসিতে পরিচয় যাচাই করতে বলা হয়েছে।',
+  'The caller reported a current threat, violence, or safety risk; decide priority first.': 'কলার বর্তমান হুমকি, সহিংসতা বা নিরাপত্তা ঝুঁকির কথা জানিয়েছেন; আগে অগ্রাধিকার ঠিক করুন।',
+  'No SMS or voicemail.': 'এসএমএস বা ভয়েসমেইল পাঠাবেন না।',
+  'Call back only on the recorded safe number at the safe time.': 'নথিতে থাকা নিরাপদ নম্বরে নির্ধারিত নিরাপদ সময়েই ফোন করুন।',
+  'Give legal information; if formal legal aid is needed, record the applicant details for DLAO review.': 'আইনগত তথ্য দিন; আনুষ্ঠানিক আইনি সহায়তা দরকার হলে ডিএলএও পর্যালোচনার জন্য আবেদনকারীর তথ্য লিখুন।',
+  'Helpline officer found that formal legal aid is needed; the request now waits for DLAO review.': 'হেল্পলাইন কর্মকর্তা দেখেছেন আনুষ্ঠানিক আইনি সহায়তা দরকার; অনুরোধটি এখন ডিএলএও পর্যালোচনার অপেক্ষায়।',
+  'Helpline officer gave legal information on the callback; no application follows.': 'হেল্পলাইন কর্মকর্তা ফোনে আইনগত তথ্য দিয়েছেন; এর জন্য কোনো আবেদন হবে না।',
   'Assign the appropriate human-led service or follow-up.': 'উপযুক্ত সেবা বা পরবর্তী যোগাযোগের দায়িত্ব একজন কর্মীকে দিন।',
   'Authorised officer to accept or request more information.': 'অনুমোদিত কর্মকর্তা আবেদনটি গ্রহণ করবেন, অথবা আরও তথ্য চাইবেন।',
   'Collect missing information using an approved safe route.': 'যোগাযোগের অনুমোদিত নিরাপদ উপায়ে বাকি তথ্য জেনে নিন।',
@@ -228,8 +248,8 @@ export function Term({ code }) {
   return say(code)
 }
 
-const good = new Set(['ACCEPTED', 'DONE', 'APPROVED', 'READABLE', 'GRANTED', 'VERIFIED', 'APPLICANT_REACHED', 'SUBMITTED_ON_TIME', 'RECONCILED', 'PAYMENT_RECORDED', 'CERTIFIED_FINAL', 'COMPLETED', 'REVIEWED', 'LIFTED', 'AGREEMENT_REACHED', 'NOT_DUPLICATE'])
-const bad = new Set(['UNREADABLE', 'DENIED', 'MISSED', 'RETURNED', 'DISPUTED', 'URGENT', 'BLOCKED_UNSAFE', 'UNKNOWN_PERSON', 'RESTRICTED', 'DIFFERENT', 'DECLINED', 'SUBMITTED_LATE', 'NO_AGREEMENT', 'ABSENT', 'HIGH', 'SAFETY_REVIEW', 'URGENT_REVIEW'])
+const good = new Set(['VICTIM_CONFIRMED', 'ACCEPTED', 'DONE', 'APPROVED', 'READABLE', 'GRANTED', 'VERIFIED', 'APPLICANT_REACHED', 'SUBMITTED_ON_TIME', 'RECONCILED', 'PAYMENT_RECORDED', 'CERTIFIED_FINAL', 'COMPLETED', 'REVIEWED', 'LIFTED', 'AGREEMENT_REACHED', 'NOT_DUPLICATE'])
+const bad = new Set(['VERIFICATION_REQUIRED', 'UNREADABLE', 'DENIED', 'MISSED', 'RETURNED', 'DISPUTED', 'URGENT', 'BLOCKED_UNSAFE', 'UNKNOWN_PERSON', 'RESTRICTED', 'DIFFERENT', 'DECLINED', 'SUBMITTED_LATE', 'NO_AGREEMENT', 'ABSENT', 'HIGH', 'SAFETY_REVIEW', 'URGENT_REVIEW'])
 export function Badge({ code }) {
   return <span className={`badge${good.has(code) ? '' : bad.has(code) ? ' warn-badge' : ' wait-badge'}`}><Term code={code} /></span>
 }

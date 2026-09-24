@@ -4,7 +4,7 @@ import { extractAnswers, extractionModel, speechModel, transcribeAnswer, voiceAi
 // Smoke check for the voice AI path. Pass an audio file to test Bangla transcription too:
 //   npm run check:voice --workspace server -- recordings/sample.webm
 const sample = 'আমি রিপন, আমার বোন ময়ূরীর পক্ষে ফোন করছি। জয়পুরহাটে থাকে। ওর স্বামী ওকে মারধর করে আর তার এনআইডি আটকে রেখেছে।'
-const fields = ['callerRole', 'callerName', 'relationship', 'applicantName', 'identityDocument', 'problem', 'district']
+const fields = ['callerRole', 'callerName', 'relationship', 'applicantName', 'district', 'problem']
 
 if (!voiceAiEnabled()) {
   console.log('VOICE AI CHECK: FAIL — GROQ_API_KEY is missing or VOICE_AI=off.')

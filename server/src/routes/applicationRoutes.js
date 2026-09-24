@@ -1,15 +1,16 @@
 import { Router } from 'express'
-import { accept, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, search, submit, updateSafeContact } from '../controllers/applicationController.js'
+import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, search, submit, updateSafeContact } from '../controllers/applicationController.js'
 import { addDocument, approveDocumentBriefing, generateBriefing, readBriefing, readDocuments, readEvidenceAccess } from '../controllers/documentController.js'
 import { readForApplication, routingDecision, send } from '../controllers/referralController.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
-import { applicationIdParam, factIdParam, taskIdParam, validateAcceptance, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEmptyBody, validateFact, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask } from '../validators/requests.js'
+import { applicationIdParam, validateAdviceOutcome, factIdParam, taskIdParam, validateAcceptance, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEmptyBody, validateFact, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask } from '../validators/requests.js'
 
 const router = Router()
 router.use(requireAuth)
 router.post('/', requireRole('DLAO_OFFICER', 'CASE_SUPPORT', 'HELPLINE_AGENT'), validateSubmission, submit)
 router.post('/status-lookup', requireRole('HELPLINE_AGENT'), validateStatusLookup, helplineStatus)
 router.get('/search', requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), validateSearch, search)
+router.post('/:applicationId/advice-outcome', applicationIdParam, requireRole('HELPLINE_AGENT'), validateAdviceOutcome, adviceOutcome)
 router.get('/:applicationId', applicationIdParam, read)
 router.post('/:applicationId/review', applicationIdParam, requireRole('DLAO_OFFICER'), validateReview, review)
 router.post('/:applicationId/review-override', applicationIdParam, requireRole('DLAO_OFFICER'), validateReviewOverride, overrideReview)

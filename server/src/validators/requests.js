@@ -2,6 +2,8 @@ import mongoose from 'mongoose'
 import { HttpError } from '../utils/httpError.js'
 
 const fail = (message) => { throw new HttpError(400, 'VALIDATION_ERROR', message) }
+// A status code: 24 hex characters for staff-made records, or the 6-digit PIN a 16699 caller hears and can say back.
+export const LOOKUP_CODE = /^(?:[a-f0-9]{24}|[0-9]{6})$/
 
 function body(request, allowed, required = allowed) {
   const value = request.body
@@ -64,7 +66,7 @@ export function validatePriorityOverride(request, _response, next) {
 export function validateStatusLookup(request, _response, next) {
   const value = body(request, ['identifier', 'lookupCode', 'callerVerified', 'contactChannel'], ['identifier', 'lookupCode', 'callerVerified'])
   if (!/^((APP|CASE)-\d{4}-\d{6})$/.test(value.identifier)) fail('A valid Application or Case ID is required.')
-  if (typeof value.lookupCode !== 'string' || !/^[a-f0-9]{24}$/.test(value.lookupCode)) fail('A valid lookup code is required.')
+  if (typeof value.lookupCode !== 'string' || !LOOKUP_CODE.test(value.lookupCode)) fail('A valid lookup code is required.')
   if (value.callerVerified !== true) fail('Human caller-verification attestation is required.')
   value.contactChannel ??= 'PHONE'
   if (!['PHONE', 'IN_PERSON'].includes(value.contactChannel)) fail('Status channel is invalid.')
@@ -223,31 +225,48 @@ export function validateConsent(request, _response, next) {
 
 const oneOf = (options, label) => (value) => options.includes(value) ? value : fail(`${label} is invalid.`)
 const explicit = (label) => (value) => typeof value === 'boolean' ? value : fail(`${label} must be explicit.`)
+const phoneNumber = (label) => (value) => typeof value === 'string' && /^\+?[0-9][0-9 -]{5,19}$/.test(value.trim()) ? value.trim() : fail(`${label} is invalid.`)
 const voiceAnswers = {
-  urgent: explicit('Urgency'),
+  service: oneOf(['COMPLAINT', 'ADVICE'], 'Service'), // asked on the call; the intake carries it as `mode`
+  adviceTopic: (value) => text(value, 'Advice question', 5, 2000),
   callerRole: oneOf(['SELF', 'REPRESENTATIVE'], 'Caller role'),
   callerName: (value) => text(value, 'Caller name', 2, 120),
   relationship: (value) => text(value, 'Relationship', 2, 80),
   applicantName: (value) => text(value, 'Applicant name', 2, 120),
-  identityDocument: oneOf(['AVAILABLE', 'UNAVAILABLE', 'UNKNOWN'], 'Identity document'),
-  problem: (value) => text(value, 'Problem', 5, 2000),
   district: (value) => text(value, 'District', 2, 60),
-  contactChannel: oneOf(['PHONE', 'IN_PERSON'], 'Safe contact channel'),
-  contactValue: (value) => typeof value === 'string' && /^\+?[0-9][0-9 -]{5,19}$/.test(value.trim()) ? value.trim() : fail('Safe phone number is invalid.'),
-  contactOwner: oneOf(['APPLICANT', 'CALLER'], 'Phone owner'),
+  nidKnown: explicit('NID known'),
+  // Format only: a 10, 13, or 17 digit NID. Nothing here checks it against any identity register.
+  nid: (value) => typeof value === 'string' && /^(?:[0-9]{10}|[0-9]{13}|[0-9]{17})$/.test(value) ? value : fail('NID number must be 10, 13, or 17 digits.'),
+  problem: (value) => text(value, 'Problem', 5, 2000),
+  urgent: explicit('Safety risk'),
+  contactChannel: oneOf(['PHONE', 'UDC', 'TRUSTED_PERSON'], 'Safe contact route'),
+  contactValue: phoneNumber('Safe phone number'),
+  trustedPerson: (value) => text(value, 'Trusted person', 2, 160),
+  trustedPhone: phoneNumber('Trusted person’s number'),
   safeTime: (value) => text(value, 'Safe time', 2, 100),
-  smsSafe: explicit('SMS safety'),
 }
 
 // Mirrors the client script's active questions; the server still decides provenance itself.
 function voiceFields({ mode, answers }) {
-  if (mode === 'CALLBACK') return ['contactValue', 'safeTime', 'district', 'urgent']
+  if (mode === 'ADVICE') return ['adviceTopic', 'contactValue', 'safeTime']
   const representative = answers.callerRole === 'REPRESENTATIVE'
-  const phone = answers.contactChannel === 'PHONE'
-  return ['urgent', 'callerRole', 'applicantName', 'identityDocument', 'problem', 'district', 'contactChannel', 'safeTime',
-    ...(representative ? ['callerName', 'relationship'] : []),
-    ...(phone ? ['contactValue', 'smsSafe'] : []),
-    ...(phone && representative ? ['contactOwner'] : [])]
+  return ['callerRole', 'callerName', ...(representative ? ['relationship', 'applicantName'] : []), 'district', 'nidKnown',
+    ...(answers.nidKnown === true ? ['nid'] : []), 'problem', 'urgent', 'contactChannel',
+    ...(answers.contactChannel === 'PHONE' ? ['contactValue'] : []),
+    ...(answers.contactChannel === 'TRUSTED_PERSON' ? ['trustedPerson', 'trustedPhone'] : []), 'safeTime']
+}
+
+// A helpline callback outcome. Formal legal aid needs the applicant's name and district; the NID is optional.
+export function validateAdviceOutcome(request, _response, next) {
+  const value = body(request, ['outcome', 'guidance', 'applicantName', 'district', 'nid'], ['outcome', 'guidance'])
+  oneOf(['INFORMATION_PROVIDED', 'FORMAL_ASSISTANCE'], 'Outcome')(value.outcome)
+  value.guidance = text(value.guidance, 'Guidance given', 10, 2000)
+  if (value.outcome === 'FORMAL_ASSISTANCE') {
+    value.applicantName = voiceAnswers.applicantName(value.applicantName)
+    value.district = voiceAnswers.district(value.district)
+    if (value.nid !== undefined) value.nid = voiceAnswers.nid(value.nid)
+  } else if (['applicantName', 'district', 'nid'].some((key) => value[key] !== undefined)) fail('Applicant details are recorded only for formal legal aid.')
+  next()
 }
 
 export function validateEmptyBody(request, _response, next) {
@@ -269,7 +288,7 @@ export function validateAnswerAudio(request, _response, next) {
 
 export function validateCallRecording(request, _response, next) {
   if (Object.keys(request.query).length) fail('Unexpected parameter.')
-  if (!/^[a-f0-9]{24}$/.test(request.get('x-lookup-code') || '')) fail('Status code is invalid.')
+  if (!LOOKUP_CODE.test(request.get('x-lookup-code') || '')) fail('Status code is invalid.')
   const type = (request.get('content-type') || '').split(';')[0].trim()
   if (!audioTypes.includes(type)) fail('Unsupported audio type.')
   if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
@@ -278,11 +297,9 @@ export function validateCallRecording(request, _response, next) {
 }
 
 export function validateVoiceIntake(request, _response, next) {
-  const value = body(request, ['mode', 'callbackReason', 'answers', 'correctedFields', 'aiFields', 'confirmation', 'transcript', 'aiSensitive'], ['mode', 'answers'])
-  oneOf(['INTAKE', 'CALLBACK'], 'Mode')(value.mode)
-  // The only callback route is the danger handoff; everything else stays in the normal intake.
-  if (value.mode === 'CALLBACK') oneOf(['URGENT_HANDOFF'], 'Callback reason')(value.callbackReason)
-  else if (value.callbackReason !== undefined) fail('Only a callback request has a callback reason.')
+  const value = body(request, ['mode', 'answers', 'correctedFields', 'aiFields', 'confirmation', 'transcript', 'aiSensitive'], ['mode', 'answers'])
+  // A complaint (INTAKE) or an information/advice request (ADVICE); a reported danger no longer cuts the intake short.
+  oneOf(['INTAKE', 'ADVICE'], 'Mode')(value.mode)
   if (!value.answers || typeof value.answers !== 'object' || Array.isArray(value.answers)) fail('answers must be an object.')
   const fields = voiceFields(value)
   const keys = Object.keys(value.answers)
