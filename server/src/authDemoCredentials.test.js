@@ -9,7 +9,7 @@ test('demo login credentials are production-disabled and role-allowlisted', asyn
     await assert.rejects(getDemoCredentials('DLAO_OFFICER'), (error) => error.code === 'DEMO_AUTH_DISABLED')
 
     process.env.NODE_ENV = 'development'
-    await assert.rejects(getDemoCredentials('CLAO'), (error) => error.code === 'DEMO_ACCOUNT_NOT_FOUND')
+    await assert.rejects(getDemoCredentials('INVALID_ROLE'), (error) => error.code === 'DEMO_ACCOUNT_NOT_FOUND')
   } finally {
     if (originalEnvironment === undefined) delete process.env.NODE_ENV
     else process.env.NODE_ENV = originalEnvironment

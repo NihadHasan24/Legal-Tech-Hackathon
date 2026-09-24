@@ -95,7 +95,7 @@ const voiceChannelUser = () => User.findOneAndUpdate(
   { upsert: true, returnDocument: 'after' },
 )
 
-export async function submitVoiceIntake({ mode, callbackReason, answers, correctedFields = [], aiFields = [], confirmation = 'BUTTON', transcript, aiSensitive = false }) {
+export async function submitVoiceIntake({ mode, callbackReason, answers, correctedFields = [], aiFields = [], confirmation = 'BUTTON', transcript, aiSensitive = false }, actor = null) {
   const channelUser = await voiceChannelUser()
   const applicationId = await nextRecordId('APP')
   const lookupCode = newLookupCode()
@@ -106,7 +106,40 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
     const smsSafe = !callback && phone && answers.smsSafe
     const sourceType = callback ? 'UNKNOWN_OR_UNVERIFIED' : representative ? 'REPRESENTATIVE_REPORTED' : 'APPLICANT_REPORTED'
     const recordedByUserId = channelUser._id
-    const [applicant] = await Person.create([{ displayName: callback ? 'Not collected (callback request)' : answers.applicantName }], { session })
+
+    let applicant
+    let citizenUserId = null
+
+    if (actor?.userId) {
+      const authUser = await User.findById(actor.userId).session(session)
+      if (authUser) {
+        citizenUserId = authUser._id.toString()
+        if (authUser.personId) {
+          applicant = await Person.findById(authUser.personId).session(session)
+        }
+        if (!applicant) {
+          const [createdPerson] = await Person.create([{ displayName: answers.applicantName || authUser.displayName || 'Citizen Applicant' }], { session })
+          applicant = createdPerson
+          authUser.personId = createdPerson._id
+        }
+        // Update user profile with intake details if provided
+        if (answers.contactValue && !authUser.phone) {
+          authUser.phone = answers.contactValue
+        }
+        if (answers.applicantName && (!authUser.displayName || authUser.displayName === authUser.username)) {
+          authUser.displayName = answers.applicantName
+          applicant.displayName = answers.applicantName
+          await applicant.save({ session })
+        }
+        await authUser.save({ session })
+      }
+    }
+
+    if (!applicant) {
+      const [newPerson] = await Person.create([{ displayName: callback ? 'Not collected (callback request)' : answers.applicantName }], { session })
+      applicant = newPerson
+    }
+
     const [caller] = representative ? await Person.create([{ displayName: answers.callerName }], { session }) : [applicant]
     const [representation] = representative ? await Representation.create([{
       applicationId, applicantPersonId: applicant._id, representativePersonId: caller._id, relationship: answers.relationship,
@@ -156,14 +189,22 @@ export async function submitVoiceIntake({ mode, callbackReason, answers, correct
       { action: 'TASK_CREATED', newState: { taskId: task.id, kind: task.kind, ownerRole: task.ownerRole } },
       ...(storedTranscript ? [{ action: 'TRANSCRIPT_STORED', newState: { transcriptId: storedTranscript.id, turns: transcript.length } }] : []),
     ]
+
     await Application.create([{
       applicationId, applicantPersonId: applicant._id, officeCode: VOICE_OFFICE, channel: 'VOICE_SIM',
       submittedByUserId: channelUser._id, auditSequence: events.length, lookupCodeHash: lookupHash(lookupCode),
+      citizenUserId,
     }], { session })
     for (const [index, event] of events.entries()) {
       await appendAudit({ ...event, applicationId, sequence: index + 1, actorUserId: channelUser._id, actorRole: 'SYSTEM', channel: 'VOICE_16699_SIM' }, session)
     }
-    return { applicationId, mode, status: 'SUBMITTED', lookupCode }
+    return {
+      applicationId,
+      mode,
+      status: 'SUBMITTED',
+      lookupCode,
+      authenticated: Boolean(citizenUserId),
+    }
   })
 }
 

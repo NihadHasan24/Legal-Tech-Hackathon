@@ -23,7 +23,7 @@ function objectId(value, label) {
 export function validateLogin(request, _response, next) {
   const value = body(request, ['username', 'password'])
   value.username = text(value.username, 'Username', 3, 50).toLowerCase()
-  if (!/^[a-z0-9._-]+$/.test(value.username)) fail('Username is invalid.')
+  if (!/^[a-z0-9._@+-]+$/.test(value.username)) fail('Username is invalid.')
   value.password = text(value.password, 'Password', 1, 256)
   next()
 }
@@ -36,7 +36,8 @@ export function validateSubmission(request, _response, next) {
 
 export function validateAcceptance(request, _response, next) {
   const value = body(request, ['reason'])
-  value.reason = text(value.reason, 'Human decision reason', 10, 1000)
+  const reasonText = value.reason?.trim() ? value.reason : 'Application accepted by officer.'
+  value.reason = text(reasonText, 'Human decision reason', 10, 1000)
   next()
 }
 
@@ -57,7 +58,8 @@ export function validateReviewOverride(request, _response, next) {
 export function validatePriorityOverride(request, _response, next) {
   const value = body(request, ['priorityDecision', 'reason'])
   if (!['URGENT', 'ROUTINE'].includes(value.priorityDecision)) fail('Priority decision is invalid.')
-  value.reason = text(value.reason, 'Human override reason', 10, 1000)
+  const reasonText = value.reason?.trim() ? value.reason : `Priority set to ${value.priorityDecision} by officer.`
+  value.reason = text(reasonText, 'Human override reason', 10, 1000)
   next()
 }
 

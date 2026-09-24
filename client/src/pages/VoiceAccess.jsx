@@ -201,7 +201,7 @@ function Readback({ call, recordings, onCorrect }) {
   )
 }
 
-export default function VoiceAccess() {
+export default function VoiceAccess({ session }) {
   const copy = copies[useLang()]
   const [call, setCall] = useState(null)
   const [modeState, setModeState] = useState({ turn: 'IDLE', mode: 'PROMPT' })
@@ -487,7 +487,12 @@ export default function VoiceAccess() {
     setSubmission({ status: 'PROCESSING' })
     let result
     try {
-      result = await api('/api/voice/intakes', { method: 'POST', body: payload(call, { confirmation, transcript: transcriptRef.current }) })
+      const token = session?.token || (typeof localStorage !== 'undefined' ? localStorage.getItem('dlas_token') : null)
+      result = await api('/api/voice/intakes', {
+        method: 'POST',
+        token,
+        body: payload(call, { confirmation, transcript: transcriptRef.current }),
+      })
     } catch {
       return setSubmission({ status: 'FAILED' })
     }
@@ -501,7 +506,13 @@ export default function VoiceAccess() {
   async function uploadRecording({ applicationId, lookupCode }) {
     setSubmission({ applicationId, lookupCode, status: 'UPLOADING_RECORDING' })
     try {
-      await api(`/api/voice/intakes/${applicationId}/recording`, { method: 'POST', audio: pendingRecordingRef.current, headers: { 'x-lookup-code': lookupCode } })
+      const token = session?.token || (typeof localStorage !== 'undefined' ? localStorage.getItem('dlas_token') : null)
+      await api(`/api/voice/intakes/${applicationId}/recording`, {
+        method: 'POST',
+        token,
+        audio: pendingRecordingRef.current,
+        headers: { 'x-lookup-code': lookupCode },
+      })
       pendingRecordingRef.current = null
       setSubmission({ applicationId, lookupCode, status: 'DONE' })
     } catch (failure) {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { after, test } from 'node:test'
 
 process.env.NODE_ENV = 'production'
+delete process.env.STAFF_LOGIN_ENABLED
 const { default: app } = await import('./app.js')
 
 const server = app.listen(0, '127.0.0.1')

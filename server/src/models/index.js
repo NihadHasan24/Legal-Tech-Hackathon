@@ -3,13 +3,18 @@ import mongoose from 'mongoose'
 const { Schema, model } = mongoose
 const ref = (name, required = true) => ({ type: Schema.Types.ObjectId, ref: name, required })
 const recordId = { type: String, required: true, index: true }
-const roles = ['DLAO_OFFICER', 'MEDIATOR', 'HELPLINE_AGENT', 'UDC_OPERATOR', 'PANEL_LAWYER', 'RECEIVING_DLAO', 'CASE_SUPPORT', 'CLAO', 'SYSTEM']
+const roles = ['DLAO_OFFICER', 'MEDIATOR', 'HELPLINE_AGENT', 'UDC_OPERATOR', 'PANEL_LAWYER', 'RECEIVING_DLAO', 'CASE_SUPPORT', 'CLAO', 'ADMIN', 'CITIZEN', 'SYSTEM']
 const sources = ['APPLICANT_REPORTED', 'APPLICANT_CONFIRMED', 'REPRESENTATIVE_REPORTED', 'INTERMEDIARY_TRANSLATED', 'INTERMEDIARY_TYPED', 'STAFF_ENTERED', 'DOCUMENT_EXTRACTED', 'AI_INFERRED', 'UNKNOWN_OR_UNVERIFIED']
 
 const userSchema = new Schema({
   username: { type: String, required: true, unique: true, lowercase: true, trim: true },
   displayName: { type: String, required: true },
   passwordHash: { type: String, required: true, select: false },
+  nid: { type: String, trim: true },
+  phone: { type: String, trim: true },
+  district: { type: String, trim: true },
+  safeTimeWindow: { type: String, trim: true },
+  personId: ref('Person', false),
   active: { type: Boolean, default: true },
   fictional: { type: Boolean, default: true },
 }, { timestamps: true })
@@ -34,6 +39,7 @@ const applicationSchema = new Schema({
   applicationId: { type: String, required: true, unique: true },
   demoSeedKey: { type: String },
   applicantPersonId: ref('Person'),
+  citizenUserId: ref('User', false),
   officeCode: { type: String, required: true },
   channel: { type: String, required: true, enum: ['WEB', 'HELPLINE_SIM', 'VOICE_SIM', 'UDC', 'DLAO'] },
   status: { type: String, enum: ['SUBMITTED', 'ACCEPTED'], default: 'SUBMITTED' },
@@ -492,7 +498,7 @@ export const LawyerUpdate = model('LawyerUpdate', lawyerUpdateSchema)
 const lawyerChangeRequestSchema = new Schema({
   applicationId: recordId,
   caseId: { type: String, required: true },
-  channel: { type: String, required: true, enum: ['PHONE', 'IN_PERSON'] },
+  channel: { type: String, required: true, enum: ['PHONE', 'IN_PERSON', 'ONLINE', 'PORTAL'] },
   reason: { type: String, required: true },
   status: { type: String, enum: ['OPEN', 'APPROVED', 'DECLINED', 'COMPLETED'], default: 'OPEN' },
   recordedByUserId: ref('User'),

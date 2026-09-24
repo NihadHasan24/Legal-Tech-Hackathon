@@ -9,6 +9,7 @@ import DuplicateReview from './DuplicateReview.jsx'
 import RelatedIncidentPanel from './RelatedIncidentPanel.jsx'
 import TriagePanel from './TriagePanel.jsx'
 import MediationPanel from './MediationPanel.jsx'
+import PhaseTracker from '../components/PhaseTracker.jsx'
 
 const none = () => bi('None', 'নেই')
 const yesNo = (value) => value ? bi('Yes', 'হ্যাঁ') : bi('No', 'না')
@@ -29,16 +30,6 @@ function CallRecording({ applicationId, token }) {
   return state === 'READY'
     ? <audio controls preload="metadata" src={url} aria-label={bi('Full call recording', 'পুরো কলের রেকর্ড')} />
     : <p className="muted">{{ LOADING: bi('Loading recording…', 'রেকর্ড লোড হচ্ছে…'), NONE: bi('No recording stored.', 'কোনো রেকর্ড নেই।'), FAILED: bi('Recording could not load. Refresh to retry.', 'কলের রেকর্ডিং খোলা যায়নি। পৃষ্ঠাটি আবার খুলে চেষ্টা করুন।') }[state]}</p>
-}
-
-// Submitted → reviewed → accepted, as one glanceable bar.
-function Progress({ record }) {
-  const reviewed = record.status === 'ACCEPTED' || record.reviewState === 'READY_FOR_DECISION'
-  const steps = [['Submitted', 'জমা', true], ['Reviewed', 'পর্যালোচিত', reviewed], ['Accepted', 'গৃহীত', record.status === 'ACCEPTED']]
-  const current = steps.findIndex(([, , done]) => !done)
-  return <ol className="journey" aria-label={bi('Progress', 'অগ্রগতি')}>
-    {steps.map(([en, bn, done], index) => <li key={en} className={done ? 'done' : undefined} aria-current={index === current ? 'step' : undefined}><Bi en={en} bn={bn} /></li>)}
-  </ol>
 }
 
 export default function RecordPage({ session }) {
@@ -110,13 +101,37 @@ export default function RecordPage({ session }) {
 
   async function submitAcceptance(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason }, bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
-    if (result) setAcceptReason('')
+    setError('')
+    setNotice('')
+    try {
+      if (data.record.reviewState !== 'READY_FOR_DECISION') {
+        const reviewPath = data.record.reviewState === 'PENDING_REVIEW'
+          ? `/api/applications/${applicationId}/review`
+          : `/api/applications/${applicationId}/review-override`
+        await api(reviewPath, {
+          token: session.token,
+          method: 'POST',
+          body: { reviewState: 'READY_FOR_DECISION', reason: 'Ready for acceptance decision.' },
+        })
+      }
+      const result = await api(`/api/applications/${applicationId}/accept`, {
+        token: session.token,
+        method: 'POST',
+        body: { reason: acceptReason || 'Application accepted by officer.' },
+      })
+      setNotice(bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
+      setRefresh((value) => value + 1)
+      setAcceptReason('')
+      return result
+    } catch (failure) { setError(failure.message); return null }
   }
 
   async function submitPriority(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
+    const result = await change(`/api/applications/${applicationId}/priority-override`, {
+      priorityDecision,
+      reason: priorityReason || `Priority set to ${priorityDecision} by officer.`,
+    }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
     if (result) setPriorityReason('')
   }
 
@@ -180,7 +195,9 @@ export default function RecordPage({ session }) {
       {notice && <p role="status" className="success">{notice}</p>}
       {loading && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
       {ready && <>
-        <Progress record={record} />
+        <div style={{ marginBottom: '1.25rem' }}>
+          <PhaseTracker application={record} />
+        </div>
         <p className="safety-note next-step"><strong><Bi en="Next step" bn="পরবর্তী ধাপ" /></strong> {tr(record.nextTask?.nextAction) || bi('No open task', 'কোনো চলমান কাজ নেই')}{record.nextTask && <small> · <Term code={record.nextTask.ownerRole} /></small>}</p>
 
         <div className="summary-grid">
@@ -225,9 +242,7 @@ export default function RecordPage({ session }) {
               </form>
               <form onSubmit={submitAcceptance} className="form-stack">
                 <h3><Bi en="2. Accept" bn="২. গ্রহণ" /></h3>
-                <label htmlFor="accept-reason"><Bi en="Decision reason" bn="সিদ্ধান্তের কারণ" /></label>
-                <textarea id="accept-reason" value={acceptReason} onChange={(event) => setAcceptReason(event.target.value)} minLength="10" maxLength="1000" required />
-                <button type="submit" disabled={record.reviewState !== 'READY_FOR_DECISION'}><Bi en="Accept application" bn="আবেদন গ্রহণ করুন" /></button>
+                <button type="submit"><Bi en="Accept application" bn="আবেদন গ্রহণ করুন" /></button>
               </form>
             </div>
           </Panel>}
@@ -250,7 +265,6 @@ export default function RecordPage({ session }) {
             {record.urgencyReasons.length ? <><h3><Bi en="Why flagged" bn="কেন চিহ্নিত" /></h3><ul>{record.urgencyReasons.map((reason) => <li key={reason}>{tr(reason)}</li>)}</ul></> : <p><Bi en="No urgency signs recorded." bn="জরুরি পরিস্থিতির কোনো ইঙ্গিত নথিতে নেই।" /></p>}
             <form onSubmit={submitPriority} className="form-stack inline-form">
               <label htmlFor="priority-decision"><Bi en="Priority decision" bn="অগ্রাধিকারের সিদ্ধান্ত" /></label><select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}><option value="URGENT">{say('URGENT')}</option><option value="ROUTINE">{say('ROUTINE')}</option></select>
-              <label htmlFor="priority-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required />
               <button type="submit"><Bi en="Save priority" bn="অগ্রাধিকার সংরক্ষণ" /></button>
             </form>
           </Panel>}
